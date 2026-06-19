@@ -5,6 +5,7 @@
   import Message from "./Message.svelte";
   import Principals from "./Principals.svelte";
   import Call from "./Call.svelte";
+  import Lightbox from "./Lightbox.svelte";
   import { initCallSignaling } from "./call";
   import {
     messages,
@@ -99,6 +100,9 @@
 
   <!-- Voice call: floating button / active bar / incoming ring (all fixed) -->
   <Call />
+
+  <!-- In-app image viewer (opened from message attachments) -->
+  <Lightbox />
 
   <!-- Error toast -->
   {#if $notice}

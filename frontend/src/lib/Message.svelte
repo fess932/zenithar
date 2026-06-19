@@ -3,6 +3,7 @@
   import { me } from "./session";
   import { t } from "./i18n";
   import VoicePlayer from "./VoicePlayer.svelte";
+  import { openLightbox } from "./lightbox";
 
   export let m: ChatMessage;
 
@@ -34,14 +35,18 @@
       <div class="mt-1 flex flex-wrap items-start gap-2">
         {#each m.attachments as a (a.id)}
           {#if a.content_type.startsWith("image/")}
-            <a href={orig(a.id)} target="_blank" rel="noreferrer">
+            <button
+              type="button"
+              onclick={() => openLightbox(a.id)}
+              class="block cursor-zoom-in overflow-hidden rounded-md border border-line transition hover:border-beacon hover:brightness-110 active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100"
+            >
               <img
                 src={a.has_thumb ? thumb(a.id) : orig(a.id)}
                 alt={a.filename}
                 loading="lazy"
-                class="max-h-48 max-w-[12rem] rounded-md border border-line object-cover"
+                class="max-h-48 max-w-[12rem] object-cover"
               />
-            </a>
+            </button>
           {:else if a.content_type.startsWith("audio/")}
             <VoicePlayer src={orig(a.id)} />
           {:else}
