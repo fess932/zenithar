@@ -91,6 +91,15 @@ export function onClientNotice(handler: (n: ClientNotice) => void): void {
   clientNoticeHandler = handler;
 }
 
+// Fires for every message that lands in the room currently open (including your
+// own echo). The notification layer uses it to chime on an incoming reply —
+// notably so an anonymous client hears an employee's answer, not just the other
+// way round.
+let incomingHandler: ((m: ChatMessage) => void) | null = null;
+export function onIncoming(handler: (m: ChatMessage) => void): void {
+  incomingHandler = handler;
+}
+
 /// Send a raw frame over the shared socket. Returns false if it isn't open.
 export function sendFrame(frame: unknown): boolean {
   if (ws?.readyState !== WebSocket.OPEN) return false;
@@ -188,6 +197,7 @@ export function connect(): void {
       const msg = (f as { message: ChatMessage }).message;
       if (msg.room_id !== get(activeRoom)) return; // not the open room
       messages.update((all) => [...all, msg]);
+      incomingHandler?.(msg);
     } else if (f.type === "client-notice") {
       const n = (f as { notice: ClientNotice }).notice;
       // Server only sends these cross-room, but guard anyway.

@@ -78,3 +78,46 @@ export async function rotateLink(id: string): Promise<Link | null> {
 export async function revokeLink(id: string): Promise<void> {
   await fetch(`/api/principals/${id}/revoke`, { method: "POST" });
 }
+
+// ---- integrations (REST API tokens) ---------------------------------------
+
+export interface IntegrationSummary {
+  id: string;
+  name: string;
+  created_at: number;
+  last_used_at: number | null;
+  active: boolean;
+}
+
+export interface IntegrationToken {
+  id: string;
+  name: string;
+  token: string; // plaintext, shown once
+}
+
+export async function listIntegrations(): Promise<IntegrationSummary[]> {
+  const r = await fetch("/api/integrations");
+  return r.ok ? ((await r.json()) as IntegrationSummary[]) : [];
+}
+
+export async function createIntegration(
+  name: string,
+): Promise<IntegrationToken | null> {
+  const r = await fetch("/api/integrations", {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({ name }),
+  });
+  return r.ok ? ((await r.json()) as IntegrationToken) : null;
+}
+
+export async function rotateIntegration(
+  id: string,
+): Promise<IntegrationToken | null> {
+  const r = await fetch(`/api/integrations/${id}/rotate`, { method: "POST" });
+  return r.ok ? ((await r.json()) as IntegrationToken) : null;
+}
+
+export async function revokeIntegration(id: string): Promise<void> {
+  await fetch(`/api/integrations/${id}/revoke`, { method: "POST" });
+}

@@ -89,6 +89,8 @@ pub struct Limits {
     pub login: RateLimiter,
     /// Uploads, keyed by principal id.
     pub uploads: RateLimiter,
+    /// REST API requests, keyed by the (hashed) API token.
+    pub api: RateLimiter,
 }
 
 impl Default for Limits {
@@ -98,6 +100,8 @@ impl Default for Limits {
             login: RateLimiter::new(20.0, 1.0 / 3.0),
             // 30 uploads burst, +1/2s sustained.
             uploads: RateLimiter::new(30.0, 0.5),
+            // 60 API calls burst, +5/s sustained (per token).
+            api: RateLimiter::new(60.0, 5.0),
         }
     }
 }

@@ -103,32 +103,68 @@ pub async fn recent_messages(
     room_id: &str,
     limit: i64,
 ) -> Result<Vec<ChatMessage>> {
-    let rows = sqlx::query_as::<_, MsgRow>(
+    messages_before(pool, room_id, limit, None).await
+}
+
+/// A page of a room's messages, oldest-first, each with its attachments. When
+/// `before` is given, only messages strictly older than that id are returned
+/// (ULIDs are time-sortable), so a client paginates backwards by passing the id
+/// of the oldest message it already has. With `before = None` this is the most
+/// recent page (used for the connect-time transcript).
+pub async fn messages_before(
+    pool: &SqlitePool,
+    room_id: &str,
+    limit: i64,
+    before: Option<&str>,
+) -> Result<Vec<ChatMessage>> {
+    const COLS: &str =
         "SELECT m.id, m.room_id, m.author_id, m.author_name, m.body, m.client_msg_id, m.created_at,
                 p.id AS reply_id, p.author_name AS reply_author, p.body AS reply_body,
                 EXISTS(SELECT 1 FROM attachments a WHERE a.message_id = p.id) AS reply_has_att
          FROM messages m
-         LEFT JOIN messages p ON p.id = m.reply_to
-         WHERE m.room_id = ?1 ORDER BY m.id DESC LIMIT ?2",
-    )
-    .bind(room_id)
-    .bind(limit)
-    .fetch_all(pool)
-    .await?;
+         LEFT JOIN messages p ON p.id = m.reply_to ";
 
-    // Attachments for exactly the messages we just loaded (same window subquery).
-    let atts = sqlx::query_as::<_, MsgAttRow>(
+    let rows = match before {
+        Some(b) => {
+            sqlx::query_as::<_, MsgRow>(&format!(
+                "{COLS} WHERE m.room_id = ?1 AND m.id < ?3 ORDER BY m.id DESC LIMIT ?2"
+            ))
+            .bind(room_id)
+            .bind(limit)
+            .bind(b)
+            .fetch_all(pool)
+            .await?
+        }
+        None => {
+            sqlx::query_as::<_, MsgRow>(&format!(
+                "{COLS} WHERE m.room_id = ?1 ORDER BY m.id DESC LIMIT ?2"
+            ))
+            .bind(room_id)
+            .bind(limit)
+            .fetch_all(pool)
+            .await?
+        }
+    };
+
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Attachments for exactly the messages we just loaded (IN the loaded ids).
+    let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+    let placeholders = (1..=ids.len())
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let att_sql = format!(
         "SELECT message_id, id, filename, content_type, size, width, height, has_thumb
-         FROM attachments
-         WHERE message_id IN (
-             SELECT id FROM messages WHERE room_id = ?1 ORDER BY id DESC LIMIT ?2
-         )
-         ORDER BY id ASC",
-    )
-    .bind(room_id)
-    .bind(limit)
-    .fetch_all(pool)
-    .await?;
+         FROM attachments WHERE message_id IN ({placeholders}) ORDER BY id ASC"
+    );
+    let mut q = sqlx::query_as::<_, MsgAttRow>(&att_sql);
+    for id in &ids {
+        q = q.bind(*id);
+    }
+    let atts = q.fetch_all(pool).await?;
 
     let mut by_msg: std::collections::HashMap<String, Vec<Attachment>> =
         std::collections::HashMap::new();
@@ -316,7 +352,7 @@ pub async fn can_access_room(
     principal_id: &str,
     room_id: &str,
 ) -> sqlx::Result<bool> {
-    if principal_kind == "user" {
+    if crate::auth::is_staff(principal_kind) {
         return room_exists(reads, room_id).await;
     }
     Ok(room_of_client(reads, principal_id).await?.as_deref() == Some(room_id))

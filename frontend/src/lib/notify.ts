@@ -3,7 +3,15 @@
 // chat.ts (`unread`); this layer is the noisy/visible side and respects per-room
 // muting. Muting silences sound + toast but NOT the unread badge.
 import { writable, get } from "svelte/store";
-import { onClientNotice, unread, joinRoom, uuid, type ClientNotice } from "./chat";
+import {
+  onClientNotice,
+  onIncoming,
+  unread,
+  joinRoom,
+  uuid,
+  type ClientNotice,
+} from "./chat";
+import { me } from "./session";
 
 export interface Toast {
   id: string;
@@ -139,5 +147,16 @@ export function initNotifications(): void {
     if (isMuted(n.room_id)) return; // quiet: unread badge still updated in chat.ts
     chime();
     pushToast(n);
+  });
+
+  // Chime on an incoming reply in the room you're viewing — but only while the
+  // tab is in the background (foreground = you can already see it). This is what
+  // gives an anonymous client a sound when an employee answers, mirroring the
+  // employee-side ping. Skips your own echoed message and muted rooms.
+  onIncoming((m) => {
+    if (document.visibilityState === "visible") return;
+    if (m.author_id === get(me)?.id) return;
+    if (isMuted(m.room_id)) return;
+    chime();
   });
 }

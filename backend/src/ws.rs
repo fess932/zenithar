@@ -8,10 +8,9 @@ use ulid::Ulid;
 
 use crate::auth::{Identity, Principal};
 use crate::db;
-use crate::models::{ChatMessage, ClientNotice, Inbound, Outbound};
+use crate::models::{ChatMessage, Inbound, Outbound};
 use crate::ratelimit::LocalBucket;
 use crate::state::AppState;
-use crate::writer::WriteCmd;
 
 const COMMON_ROOM: &str = "common";
 const HISTORY_ON_CONNECT: i64 = 50;
@@ -152,19 +151,8 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                             created_at: crate::now_millis(),
                             attachments,
                         };
-                        // Realtime first: fan out to everyone subscribed.
-                        let _ = state.broadcast.send(chat.clone());
-                        // Anonymous client wrote → ping every employee, cross-room.
-                        if !is_employee {
-                            let _ = state.notify.send(ClientNotice {
-                                room_id: chat.room_id.clone(),
-                                from_name: principal.display_name.clone(),
-                                preview: notice_preview(&chat.body, !chat.attachments.is_empty()),
-                                created_at: chat.created_at,
-                            });
-                        }
-                        // Durability second: batched write.
-                        if state.writes.send(WriteCmd { msg: chat, ack: None }).await.is_err() {
+                        // Fan out + (for anonymous clients) ping employees + write.
+                        if crate::send::deliver(&state, chat, !is_employee).await.is_err() {
                             break; // writer gone
                         }
                     }
@@ -279,25 +267,6 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
     }
     state.presence.leave(&principal.id);
     info!("websocket closed");
-}
-
-/// A short, single-line preview for a notification: the trimmed body (capped),
-/// or a paperclip marker when the message is attachment-only.
-fn notice_preview(body: &str, has_attachment: bool) -> String {
-    const MAX: usize = 80;
-    let body = body.trim();
-    if body.is_empty() {
-        return if has_attachment {
-            "📎".to_string()
-        } else {
-            String::new()
-        };
-    }
-    if body.chars().count() > MAX {
-        format!("{}…", body.chars().take(MAX).collect::<String>())
-    } else {
-        body.to_string()
-    }
 }
 
 /// Whether this socket's principal may start/join a call in `room_id`. Mirrors

@@ -96,7 +96,9 @@ test("browser: admin issues a client link and the client can open it", async ({
 }) => {
   await page.goto(ADMIN_LINK);
   await page.getByRole("button", { name: /Ссылки|Links/ }).click();
-  await page.getByRole("button", { name: /Создать|Create/ }).click();
+  // The "Create" button exists in both the links and integrations sections;
+  // the first one is the link creator.
+  await page.getByRole("button", { name: /Создать|Create/ }).first().click();
 
   const link = await page.locator("code").first().textContent();
   expect(link).toContain("/i/");
@@ -128,7 +130,7 @@ test("browser: employee opens a client room; the message routes only there", asy
   await page.goto(ADMIN_LINK);
   await page.getByRole("button", { name: /Ссылки|Links/ }).click();
   await page.getByPlaceholder(/необязательно|optional/i).fill(clientName);
-  await page.getByRole("button", { name: /Создать|Create/ }).click();
+  await page.getByRole("button", { name: /Создать|Create/ }).first().click();
   const link = await page.locator("code").first().textContent();
   expect(link).toContain("/i/");
 
@@ -421,4 +423,61 @@ test("api: auth gate, admin vs client, revoke, logout", async ({ playwright, bas
   await admin.dispose();
   await client.dispose();
   await reuse.dispose();
+});
+
+test("api: integration token creates a client and posts the order", async ({
+  playwright,
+  baseURL,
+}) => {
+  const admin = await playwright.request.newContext({ baseURL });
+  await admin.get(ADMIN_LINK);
+
+  // Admin mints an API token for an integration.
+  const created = await (
+    await admin.post("/api/integrations", { data: { name: "CRM" } })
+  ).json();
+  expect(created.token).toMatch(/^zk_/);
+
+  // The integration authenticates with Bearer (no cookies).
+  const api = await playwright.request.newContext({
+    baseURL,
+    extraHTTPHeaders: { Authorization: `Bearer ${created.token}` },
+  });
+
+  const who = await (await api.get("/api/v1/me")).json();
+  expect(who.kind).toBe("bot");
+
+  // It creates a client + room + link, seeding the order as the first message.
+  const order = `order-${Date.now()}`;
+  const res = await api.post("/api/v1/clients", {
+    data: { name: "Acme", order },
+  });
+  expect(res.ok()).toBeTruthy();
+  const lead = await res.json();
+  expect(lead.url).toMatch(/^\/i\//);
+  expect(lead.room_id).toBeTruthy();
+
+  // The seeded order lands in the room's history (writes are batched, so poll).
+  await expect
+    .poll(async () => {
+      const msgs = await (await api.get(`/api/v1/rooms/${lead.room_id}/messages`)).json();
+      return msgs.some((m: { body: string }) => m.body === order);
+    }, { timeout: 5000 })
+    .toBeTruthy();
+
+  // It can post into the room by client id, as the bot.
+  const reply = `bot-reply-${Date.now()}`;
+  const posted = await api.post(`/api/v1/clients/${lead.client_id}/messages`, {
+    data: { body: reply },
+  });
+  expect(posted.ok()).toBeTruthy();
+  expect((await posted.json()).author_name).toBe("CRM");
+
+  // No Bearer → 401.
+  const anon = await playwright.request.newContext({ baseURL });
+  expect((await anon.get("/api/v1/me")).status()).toBe(401);
+
+  await admin.dispose();
+  await api.dispose();
+  await anon.dispose();
 });

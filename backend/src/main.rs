@@ -12,6 +12,7 @@ use tower_http::trace::TraceLayer;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+mod api;
 mod auth;
 mod calls;
 mod db;
@@ -21,6 +22,7 @@ mod presence;
 mod ratelimit;
 mod recorder;
 mod routes;
+mod send;
 mod state;
 mod storage;
 mod uploads;
@@ -234,6 +236,34 @@ async fn main() -> Result<()> {
         )
         .route("/api/principals/{id}/rotate", post(routes::rotate))
         .route("/api/principals/{id}/revoke", post(routes::revoke))
+        .route(
+            "/api/integrations",
+            get(routes::list_integrations).post(routes::create_integration),
+        )
+        .route(
+            "/api/integrations/{id}/rotate",
+            post(routes::rotate_integration),
+        )
+        .route(
+            "/api/integrations/{id}/revoke",
+            post(routes::revoke_integration),
+        )
+        // REST API for integrations (Bearer zk_… auth).
+        .route("/api/v1/me", get(api::me))
+        .route("/api/v1/rooms", get(api::rooms))
+        .route(
+            "/api/v1/rooms/{id}/messages",
+            get(api::get_messages).post(api::post_message),
+        )
+        .route("/api/v1/clients", post(api::create_client))
+        .route(
+            "/api/v1/clients/{client_id}/messages",
+            post(api::post_client_message),
+        )
+        .route(
+            "/api/v1/uploads",
+            post(api::upload).layer(DefaultBodyLimit::max(uploads::MAX_UPLOAD_BYTES + 1024)),
+        )
         .fallback(static_handler)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

@@ -74,6 +74,15 @@ const ru = {
   revoked: "отозвана",
   noPrincipals: "Пока нет ни одной ссылки. Создайте первую.",
   freshLink: "Свежая ссылка (показывается один раз)",
+  // integrations (REST API)
+  integrations: "Интеграции",
+  newIntegration: "Новая интеграция",
+  integrationName: "Название (например, CRM)",
+  noIntegrations: "Интеграций пока нет.",
+  freshToken: "API-токен (показывается один раз)",
+  apiToken: "API-токен",
+  lastUsed: "Использован",
+  neverUsed: "не использовался",
 } as const;
 
 const en: Record<keyof typeof ru, string> = {
@@ -143,6 +152,15 @@ const en: Record<keyof typeof ru, string> = {
   revoked: "revoked",
   noPrincipals: "No links yet. Create the first one.",
   freshLink: "Fresh link (shown once)",
+  // integrations (REST API)
+  integrations: "Integrations",
+  newIntegration: "New integration",
+  integrationName: "Name (e.g. CRM)",
+  noIntegrations: "No integrations yet.",
+  freshToken: "API token (shown once)",
+  apiToken: "API token",
+  lastUsed: "Last used",
+  neverUsed: "never used",
 };
 
 export type Key = keyof typeof ru;

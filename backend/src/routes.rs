@@ -8,7 +8,9 @@ use axum::Json;
 use axum_extra::extract::cookie::CookieJar;
 use serde::{Deserialize, Serialize};
 
-use crate::auth::{self, Admin, Identity, Principal, PrincipalSummary, SESSION_COOKIE};
+use crate::auth::{
+    self, Admin, Identity, IntegrationSummary, Principal, PrincipalSummary, SESSION_COOKIE,
+};
 use crate::models::RoomSummary;
 use crate::names;
 use crate::state::AppState;
@@ -240,4 +242,88 @@ pub async fn list_principals(
         .await
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+// ---- admin: integrations (API tokens) --------------------------------------
+
+#[derive(Deserialize)]
+pub struct CreateIntegration {
+    pub name: String,
+}
+
+#[derive(Serialize)]
+pub struct IntegrationToken {
+    pub id: String,
+    pub name: String,
+    /// Plaintext API token — shown once, store it now.
+    pub token: String,
+}
+
+pub async fn list_integrations(
+    State(state): State<AppState>,
+    _admin: Admin,
+) -> Result<Json<Vec<IntegrationSummary>>, StatusCode> {
+    auth::list_integrations(&state.reads)
+        .await
+        .map(Json)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+pub async fn create_integration(
+    State(state): State<AppState>,
+    _admin: Admin,
+    headers: HeaderMap,
+    Json(body): Json<CreateIntegration>,
+) -> Response {
+    if !origin_ok(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let name = body.name.trim();
+    if name.is_empty() || name.chars().count() > 40 {
+        return (StatusCode::BAD_REQUEST, "name must be 1–40 chars").into_response();
+    }
+    match auth::create_integration(&state.db, name).await {
+        Ok((id, token)) => Json(IntegrationToken {
+            id,
+            name: name.to_string(),
+            token,
+        })
+        .into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+pub async fn rotate_integration(
+    State(state): State<AppState>,
+    _admin: Admin,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if !origin_ok(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    match auth::rotate_api_token(&state.db, &id).await {
+        Ok(token) => Json(IntegrationToken {
+            id,
+            name: String::new(),
+            token,
+        })
+        .into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+pub async fn revoke_integration(
+    State(state): State<AppState>,
+    _admin: Admin,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if !origin_ok(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    match auth::revoke_api_tokens(&state.db, &id).await {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
 }

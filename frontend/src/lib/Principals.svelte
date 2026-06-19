@@ -6,7 +6,12 @@
     createPrincipal,
     rotateLink,
     revokeLink,
+    listIntegrations,
+    createIntegration,
+    rotateIntegration,
+    revokeIntegration,
     type PrincipalSummary,
+    type IntegrationSummary,
     type Link,
   } from "./session";
 
@@ -18,10 +23,50 @@
   let fresh: { url: string; label: string } | null = null;
   let copied = false;
 
+  // integrations
+  let integrations: IntegrationSummary[] = [];
+  let intName = "";
+  let freshToken: string | null = null;
+  let tokenCopied = false;
+
   onMount(refresh);
 
   async function refresh(): Promise<void> {
-    rows = await listPrincipals();
+    [rows, integrations] = await Promise.all([
+      listPrincipals(),
+      listIntegrations(),
+    ]);
+  }
+
+  async function addIntegration(): Promise<void> {
+    const created = await createIntegration(intName.trim() || "API");
+    if (created) {
+      freshToken = created.token;
+      tokenCopied = false;
+    }
+    intName = "";
+    await refresh();
+  }
+  async function rotateInt(id: string): Promise<void> {
+    const t = await rotateIntegration(id);
+    if (t) {
+      freshToken = t.token;
+      tokenCopied = false;
+    }
+    await refresh();
+  }
+  async function revokeInt(id: string): Promise<void> {
+    await revokeIntegration(id);
+    freshToken = null;
+    await refresh();
+  }
+  async function copyToken(): Promise<void> {
+    if (!freshToken) return;
+    await navigator.clipboard.writeText(freshToken);
+    tokenCopied = true;
+  }
+  function fmtUsed(t: number | null, never: string): string {
+    return t === null ? never : new Date(t).toLocaleString();
   }
 
   function fullUrl(path: string): string {
@@ -160,5 +205,85 @@
         {/each}
       </ul>
     {/if}
+
+    <!-- integrations (REST API tokens) -->
+    <section class="mt-10 max-w-2xl">
+      <h2 class="mb-2 text-[0.8rem] font-semibold uppercase tracking-[0.08em] text-muted">
+        {$t("integrations")}
+      </h2>
+      <div class="flex flex-wrap items-center gap-2">
+        <input
+          bind:value={intName}
+          placeholder={$t("integrationName")}
+          maxlength="40"
+          class="min-h-11 min-w-0 flex-1 rounded-md border border-line bg-surface-2 px-3 text-base text-text placeholder:text-muted focus-visible:outline-2 focus-visible:outline-beacon sm:text-[0.9rem]"
+        />
+        <button
+          type="button"
+          onclick={addIntegration}
+          class="min-h-11 w-full cursor-pointer rounded-md border border-beacon bg-beacon px-4 font-semibold text-[#1a1206] hover:brightness-110 sm:w-auto"
+        >
+          {$t("create")}
+        </button>
+      </div>
+
+      {#if freshToken}
+        <div class="mt-3 rounded-md border border-line bg-surface-2 p-3">
+          <div class="mb-1 font-mono text-[0.7rem] uppercase tracking-[0.06em] text-muted">
+            {$t("freshToken")}
+          </div>
+          <div class="flex items-center gap-2">
+            <code class="flex-1 truncate text-[0.8rem] text-beacon">{freshToken}</code>
+            <button
+              type="button"
+              onclick={copyToken}
+              class="cursor-pointer rounded-md border border-line px-2 py-1 font-mono text-[0.72rem] text-muted hover:text-text"
+            >
+              {tokenCopied ? $t("copied") : $t("copy")}
+            </button>
+          </div>
+        </div>
+      {/if}
+
+      {#if integrations.length === 0}
+        <p class="mt-3 font-mono text-[0.82rem] text-muted">{$t("noIntegrations")}</p>
+      {:else}
+        <ul class="mt-3 divide-y divide-line">
+          {#each integrations as it (it.id)}
+            <li class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:gap-3 sm:py-2">
+              <div class="flex min-w-0 items-center gap-3 sm:flex-1">
+                <span class="min-w-0 flex-1 truncate text-[0.9rem]">{it.name}</span>
+                <span class="shrink-0 font-mono text-[0.68rem] text-muted">
+                  {$t("lastUsed")}: {fmtUsed(it.last_used_at, $t("neverUsed"))}
+                </span>
+                <span
+                  class="shrink-0 font-mono text-[0.7rem]"
+                  class:text-beacon={it.active}
+                  class:text-muted={!it.active}
+                >
+                  {it.active ? $t("active") : $t("revoked")}
+                </span>
+              </div>
+              <div class="flex gap-1 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onclick={() => rotateInt(it.id)}
+                  class="inline-flex min-h-9 cursor-pointer items-center rounded-md px-2 font-mono text-[0.72rem] text-muted hover:bg-surface-2 hover:text-text"
+                >
+                  {$t("rotate")}
+                </button>
+                <button
+                  type="button"
+                  onclick={() => revokeInt(it.id)}
+                  class="inline-flex min-h-9 cursor-pointer items-center rounded-md px-2 font-mono text-[0.72rem] text-muted hover:bg-surface-2 hover:text-bad"
+                >
+                  {$t("revoke")}
+                </button>
+              </div>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
   </main>
 </div>

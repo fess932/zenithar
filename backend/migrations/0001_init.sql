@@ -6,7 +6,7 @@
 -- (kind='client'). Everyone authenticates by a link-token, not a password.
 CREATE TABLE IF NOT EXISTS principals (
     id           TEXT PRIMARY KEY,           -- ULID
-    kind         TEXT NOT NULL CHECK (kind IN ('user', 'client')),
+    kind         TEXT NOT NULL CHECK (kind IN ('user', 'client', 'bot')),
     display_name TEXT NOT NULL,              -- random at creation; users rename themselves
     is_admin     INTEGER NOT NULL DEFAULT 0, -- 0/1, only meaningful for 'user'
     created_at   INTEGER NOT NULL            -- unix millis
@@ -23,6 +23,21 @@ CREATE TABLE IF NOT EXISTS tokens (
     rotated_from TEXT REFERENCES tokens(id)  -- audit trail of reissues
 );
 CREATE INDEX IF NOT EXISTS idx_tokens_principal ON tokens(principal_id);
+
+-- API tokens for integrations (Phase 6). A `bot` principal authenticates over
+-- REST with `Authorization: Bearer zk_…`; like link-tokens we store only the
+-- SHA-256 hash and show the plaintext once at issue time. `last_used_at` is a
+-- best-effort touch for the admin UI; rotation revokes the previous token.
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id           TEXT PRIMARY KEY,           -- ULID
+    token_hash   TEXT NOT NULL UNIQUE,       -- SHA-256 of the token; plaintext never stored
+    principal_id TEXT NOT NULL REFERENCES principals(id),
+    name         TEXT NOT NULL,              -- human label, e.g. "CRM"
+    created_at   INTEGER NOT NULL,
+    last_used_at INTEGER,                    -- best-effort, updated on use
+    revoked_at   INTEGER                     -- NULL = active
+);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_principal ON api_tokens(principal_id);
 
 -- Cookie sessions: a link-token is exchanged for an httpOnly cookie on first visit.
 CREATE TABLE IF NOT EXISTS sessions (

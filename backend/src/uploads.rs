@@ -21,16 +21,23 @@ use crate::{db, now_millis};
 pub const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
 const THUMB_MAX: u32 = 320;
 
-/// `POST /api/upload` — multipart `room_id` + `file`. Returns the attachment meta.
+/// `POST /api/upload` — multipart `room_id` + `file`, browser path (cookie auth +
+/// CSRF origin check). Returns the attachment meta.
 pub async fn upload(
     State(state): State<AppState>,
     Identity(p): Identity,
     headers: HeaderMap,
-    mut multipart: Multipart,
+    multipart: Multipart,
 ) -> Response {
     if !origin_ok(&headers) {
         return StatusCode::FORBIDDEN.into_response();
     }
+    ingest(&state, &p, multipart).await
+}
+
+/// Shared upload core: rate-limit, parse multipart, validate, store bytes + meta.
+/// Reused by the browser route ([`upload`]) and the REST API (Bearer auth).
+pub async fn ingest(state: &AppState, p: &Principal, mut multipart: Multipart) -> Response {
     if !state.limits.uploads.check(&p.id) {
         return (StatusCode::TOO_MANY_REQUESTS, "too many uploads").into_response();
     }
@@ -73,7 +80,7 @@ pub async fn upload(
     if bytes.len() > MAX_UPLOAD_BYTES {
         return (StatusCode::PAYLOAD_TOO_LARGE, "file too large").into_response();
     }
-    if !can_access(&state.reads, &p, &room_id).await {
+    if !can_access(&state.reads, p, &room_id).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -220,9 +227,10 @@ async fn serve_inner(state: AppState, p: Principal, id: &str, thumb: bool) -> Re
         .into_response()
 }
 
-/// Employees may access any existing room; clients only their own.
+/// Staff (employees + integration bots) may access any existing room; a client
+/// only its own.
 async fn can_access(reads: &SqlitePool, p: &Principal, room_id: &str) -> bool {
-    if p.kind == "user" {
+    if crate::auth::is_staff(&p.kind) {
         return db::room_exists(reads, room_id).await.unwrap_or(false);
     }
     matches!(db::room_of_client(reads, &p.id).await, Ok(Some(r)) if r == room_id)

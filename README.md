@@ -48,6 +48,30 @@ See [docs/plans/phase-1-auth.md](docs/plans/phase-1-auth.md).
 
 See the roadmap in [requirements.md](requirements.md).
 
+## Integration API
+
+A REST API under `/api/v1` lets integrations (CRM, bots) read and post to chats.
+Authenticate with a permanent **Bearer token** (`zk_…`) created in the admin UI
+(the "Integrations" section). An integration is a `bot` principal — a first-class
+message author. Full reference: [docs/plans/phase-6-api.md](docs/plans/phase-6-api.md).
+
+```sh
+# create a client + login link, seeding the order as the first message
+curl -X POST https://host/api/v1/clients \
+  -H "Authorization: Bearer zk_…" -H "Content-Type: application/json" \
+  -d '{"name":"Acme","order":"Order #123: laptop repair"}'
+# → {"client_id":"…","room_id":"…","url":"/i/…"}
+
+# post into a client's room by client_id
+curl -X POST https://host/api/v1/clients/<client_id>/messages \
+  -H "Authorization: Bearer zk_…" -H "Content-Type: application/json" \
+  -d '{"body":"On it!"}'
+```
+
+Other routes: `GET /api/v1/me`, `GET /api/v1/rooms`,
+`GET|POST /api/v1/rooms/{id}/messages` (history is paginated via `?limit&before`),
+`POST /api/v1/uploads` (multipart, then pass the returned id in `attachment_ids`).
+
 ## Deploy (self-host)
 
 One self-contained container; state in a `./data` volume. Full guide —
