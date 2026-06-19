@@ -205,6 +205,14 @@ async fn main() -> Result<()> {
         .ok()
         .and_then(|v| v.split_once('-').map(|(a, b)| (a.trim().to_string(), b.trim().to_string())))
         .and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)));
+    // Surface the call/media config at startup so a deploy can confirm the new
+    // binary is live (e.g. that ZENITHAR_UDP_PORTS is actually honored).
+    info!(
+        public_ips = ?public_ips,
+        udp_ports = ?udp_ports,
+        stun = ?stun,
+        "call media config"
+    );
     // Call recordings (Phase 5): one Ogg/Opus file per participant, on disk.
     let recordings_dir = std::env::var("ZENITHAR_RECORDINGS")
         .map(std::path::PathBuf::from)
