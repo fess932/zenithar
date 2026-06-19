@@ -8,7 +8,7 @@ use ulid::Ulid;
 
 use crate::auth::{Identity, Principal};
 use crate::db;
-use crate::models::{ChatMessage, Inbound, Outbound};
+use crate::models::{ChatMessage, ClientNotice, Inbound, Outbound};
 use crate::state::AppState;
 use crate::writer::WriteCmd;
 
@@ -47,6 +47,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
 
     let mut rx = state.broadcast.subscribe();
     let mut sigrx = state.signal.subscribe();
+    let mut notrx = state.notify.subscribe();
     let (mut sender, mut receiver) = socket.split();
 
     // Initial transcript for the default room.
@@ -129,6 +130,15 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                         };
                         // Realtime first: fan out to everyone subscribed.
                         let _ = state.broadcast.send(chat.clone());
+                        // Anonymous client wrote → ping every employee, cross-room.
+                        if !is_employee {
+                            let _ = state.notify.send(ClientNotice {
+                                room_id: chat.room_id.clone(),
+                                from_name: principal.display_name.clone(),
+                                preview: notice_preview(&chat.body, !chat.attachments.is_empty()),
+                                created_at: chat.created_at,
+                            });
+                        }
                         // Durability second: batched write.
                         if state.writes.send(WriteCmd { msg: chat, ack: None }).await.is_err() {
                             break; // writer gone
@@ -190,6 +200,26 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                 }
             }
 
+            // Client-message heads-up: employees get pinged about anonymous
+            // rooms they aren't currently viewing (the room they're in already
+            // shows the message live, so skip it to avoid a double-notify).
+            note = notrx.recv() => {
+                match note {
+                    Ok(n) => {
+                        if is_employee && n.room_id != active_room {
+                            let frame = Outbound::ClientNotice { notice: n };
+                            if let Ok(json) = serde_json::to_string(&frame) {
+                                if sender.send(Message::Text(json.into())).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Err(RecvError::Lagged(_)) => {}
+                    Err(RecvError::Closed) => break,
+                }
+            }
+
             // Broadcast fan-out: forward only the active room (no cross-room leak).
             bcast = rx.recv() => {
                 match bcast {
@@ -209,6 +239,25 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
         }
     }
     info!("websocket closed");
+}
+
+/// A short, single-line preview for a notification: the trimmed body (capped),
+/// or a paperclip marker when the message is attachment-only.
+fn notice_preview(body: &str, has_attachment: bool) -> String {
+    const MAX: usize = 80;
+    let body = body.trim();
+    if body.is_empty() {
+        return if has_attachment {
+            "📎".to_string()
+        } else {
+            String::new()
+        };
+    }
+    if body.chars().count() > MAX {
+        format!("{}…", body.chars().take(MAX).collect::<String>())
+    } else {
+        body.to_string()
+    }
 }
 
 /// Whether this socket's principal may start/join a call in `room_id`. Mirrors

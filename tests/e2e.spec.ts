@@ -295,6 +295,42 @@ test("browser: call signaling — start offers, rings the room, leave ends it", 
   await ctx.close();
 });
 
+test("browser: anonymous message notifies employees (toast + unread badge)", async ({
+  page,
+  browser,
+}) => {
+  await page.goto(ADMIN_LINK);
+  await expect(page.locator('.beacon[data-state="live"]')).toBeVisible({ timeout: 10000 });
+
+  // Mint an anonymous client and open their chat in a separate context.
+  const client = await page.evaluate(async () => {
+    const r = await fetch("/api/principals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "client" }),
+    });
+    return r.json();
+  });
+  expect(client.url).toContain("/i/");
+
+  const ctx = await browser.newContext();
+  const cp = await ctx.newPage();
+  await cp.goto(client.url);
+  await expect(cp.locator('.beacon[data-state="live"]')).toBeVisible({ timeout: 10000 });
+
+  // Admin stays in the common room; the client writes in their own room.
+  const msg = `ping-${Date.now()}`;
+  const cinput = cp.getByPlaceholder(composer);
+  await cinput.fill(msg);
+  await cinput.press("Enter");
+
+  // Admin (cross-room) gets a toast previewing the message + an unread badge.
+  await expect(page.getByText(msg)).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole("button", { name: /Чаты|Chats/ })).toContainText("1");
+
+  await ctx.close();
+});
+
 test("api: create an anonymous client (link + room)", async ({ playwright, baseURL }) => {
   const admin = await playwright.request.newContext({ baseURL });
   await admin.get(ADMIN_LINK);

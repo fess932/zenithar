@@ -4,6 +4,7 @@
   import Composer from "./Composer.svelte";
   import Message from "./Message.svelte";
   import Principals from "./Principals.svelte";
+  import { fly } from "svelte/transition";
   import Call from "./Call.svelte";
   import Lightbox from "./Lightbox.svelte";
   import { initCallSignaling } from "./call";
@@ -16,8 +17,17 @@
     loadRooms,
     notice,
     dismissNotice,
+    unread,
     type RoomSummary,
   } from "./chat";
+  import {
+    initNotifications,
+    toasts,
+    openToast,
+    dismissToast,
+    mutedRooms,
+    toggleMute,
+  } from "./notify";
   import { me } from "./session";
   import { t } from "./i18n";
 
@@ -31,8 +41,11 @@
   onMount(() => {
     connect();
     initCallSignaling();
+    initNotifications();
     if (isEmployee) loadRooms();
   });
+
+  $: totalUnread = Object.values($unread).reduce((a, b) => a + b, 0);
 
   function onScroll(): void {
     pinned = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 80;
@@ -76,10 +89,17 @@
         <button
           type="button"
           onclick={openDrawer}
-          class="inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-md border border-line px-2 text-muted hover:text-text"
+          class="relative inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-md border border-line px-2 text-muted hover:text-text"
           aria-label={$t("rooms")}
         >
           <span class="text-base leading-none">☰</span>
+          {#if totalUnread > 0}
+            <span
+              class="absolute -left-1 -top-1 grid min-w-[1.1rem] place-items-center rounded-full bg-beacon px-1 text-[0.68rem] font-medium leading-tight text-[#1a1206]"
+            >
+              {totalUnread}
+            </span>
+          {/if}
           <span class="max-w-[60vw] truncate font-mono text-[0.8rem] text-text">{currentTitle}</span>
         </button>
       </div>
@@ -103,6 +123,49 @@
 
   <!-- In-app image viewer (opened from message attachments) -->
   <Lightbox />
+
+  <!-- Notification toasts: new messages from anonymous client rooms -->
+  {#if $toasts.length > 0}
+    <div
+      class="pointer-events-none fixed left-1/2 top-[calc(0.6rem+env(safe-area-inset-top))] z-50 flex w-[min(26rem,92vw)] -translate-x-1/2 flex-col gap-2"
+    >
+      {#each $toasts as toast (toast.id)}
+        <div
+          transition:fly={{ y: -16, duration: 180 }}
+          class="pointer-events-auto flex items-center gap-2 rounded-md border border-beacon bg-surface px-3 py-2 shadow-lg"
+        >
+          <button
+            type="button"
+            onclick={() => openToast(toast)}
+            class="flex min-w-0 flex-1 items-center gap-2 text-left"
+          >
+            <span class="text-base leading-none">💬</span>
+            <span class="min-w-0">
+              <span class="block truncate font-mono text-[0.78rem] text-beacon">{toast.from_name}</span>
+              <span class="block truncate text-[0.82rem] text-muted">{toast.preview}</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onclick={() => toggleMute(toast.room_id)}
+            aria-label={$t("muteRoom")}
+            title={$t("muteRoom")}
+            class="grid size-7 shrink-0 cursor-pointer place-items-center rounded text-muted hover:text-text"
+          >
+            🔕
+          </button>
+          <button
+            type="button"
+            onclick={() => dismissToast(toast.id)}
+            aria-label={$t("dismiss")}
+            class="grid size-7 shrink-0 cursor-pointer place-items-center rounded text-muted hover:text-text"
+          >
+            ✕
+          </button>
+        </div>
+      {/each}
+    </div>
+  {/if}
 
   <!-- Error toast -->
   {#if $notice}
@@ -140,19 +203,43 @@
         <p class="px-1 font-mono text-[0.8rem] text-muted">{$t("noRooms")}</p>
       {:else}
         {#each $rooms as r (r.id)}
-          <button
-            type="button"
-            onclick={() => pick(r.id)}
-            aria-current={r.id === $activeRoom}
-            class="flex items-center gap-2 rounded-md px-3 py-2 text-left text-[0.9rem] hover:bg-surface-2 aria-[current=true]:bg-surface-2 aria-[current=true]:text-beacon"
-          >
-            <span
-              class="size-1.5 shrink-0 rounded-full"
-              class:bg-beacon={r.kind === "common"}
-              class:bg-you={r.kind === "client"}
-            ></span>
-            <span class="truncate">{roomLabel(r)}</span>
-          </button>
+          {@const count = $unread[r.id] ?? 0}
+          {@const muted = $mutedRooms.has(r.id)}
+          <div class="flex items-center gap-1">
+            <button
+              type="button"
+              onclick={() => pick(r.id)}
+              aria-current={r.id === $activeRoom}
+              class="flex flex-1 items-center gap-2 rounded-md px-3 py-2 text-left text-[0.9rem] hover:bg-surface-2 aria-[current=true]:bg-surface-2 aria-[current=true]:text-beacon"
+            >
+              <span
+                class="size-1.5 shrink-0 rounded-full"
+                class:bg-beacon={r.kind === "common"}
+                class:bg-you={r.kind === "client"}
+              ></span>
+              <span class="flex-1 truncate">{roomLabel(r)}</span>
+              {#if count > 0}
+                <span
+                  class="grid min-w-5 shrink-0 place-items-center rounded-full bg-beacon px-1.5 text-[0.7rem] font-medium text-[#1a1206]"
+                  class:opacity-50={muted}
+                >
+                  {count}
+                </span>
+              {/if}
+            </button>
+            {#if r.kind === "client"}
+              <button
+                type="button"
+                onclick={() => toggleMute(r.id)}
+                aria-label={muted ? $t("unmuteRoom") : $t("muteRoom")}
+                aria-pressed={muted}
+                title={muted ? $t("unmuteRoom") : $t("muteRoom")}
+                class="grid size-8 shrink-0 cursor-pointer place-items-center rounded-md text-muted hover:text-text"
+              >
+                {muted ? "🔕" : "🔔"}
+              </button>
+            {/if}
+          </div>
         {/each}
       {/if}
     </aside>

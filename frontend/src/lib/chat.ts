@@ -40,6 +40,14 @@ export interface RoomSummary {
   created_at: number;
 }
 
+/// A heads-up that an anonymous client wrote in their room (employees only).
+export interface ClientNotice {
+  room_id: string;
+  from_name: string;
+  preview: string;
+  created_at: number;
+}
+
 export type Status = "connecting" | "live" | "down";
 
 // Server → client frames. Chat frames are handled here; `call-*` signaling
@@ -47,6 +55,7 @@ export type Status = "connecting" | "live" | "down";
 type Frame =
   | { type: "history"; room_id: string; messages: ChatMessage[] }
   | { type: "message"; message: ChatMessage }
+  | { type: "client-notice"; notice: ClientNotice }
   | { type: string; [k: string]: unknown };
 
 /// A unique id that works outside secure contexts too. `crypto.randomUUID` is
@@ -67,6 +76,12 @@ export function onSignal(handler: (f: Frame) => void): void {
   signalHandler = handler;
 }
 
+// The notification layer registers here to react (sound/toast) to client notices.
+let clientNoticeHandler: ((n: ClientNotice) => void) | null = null;
+export function onClientNotice(handler: (n: ClientNotice) => void): void {
+  clientNoticeHandler = handler;
+}
+
 /// Send a raw frame over the shared socket. Returns false if it isn't open.
 export function sendFrame(frame: unknown): boolean {
   if (ws?.readyState !== WebSocket.OPEN) return false;
@@ -81,6 +96,19 @@ export const activeRoom = writable<string | null>(null);
 
 /// The message the composer is currently replying to (Telegram-style), or null.
 export const replyingTo = writable<ChatMessage | null>(null);
+
+/// Unread anonymous-client messages per room (cleared when the room is opened).
+/// Counts even for muted rooms — muting only silences sound/popups, see notify.ts.
+export const unread = writable<Record<string, number>>({});
+
+function clearUnread(room_id: string): void {
+  unread.update((u) => {
+    if (!(room_id in u)) return u;
+    const next = { ...u };
+    delete next[room_id];
+    return next;
+  });
+}
 
 /// Briefly highlighted message id — set when jumping to a quoted original.
 export const highlightId = writable<string | null>(null);
@@ -137,12 +165,21 @@ export function connect(): void {
       return; // ignore non-JSON frames
     }
     if (f.type === "history") {
-      activeRoom.set((f as { room_id: string }).room_id);
+      const room = (f as { room_id: string }).room_id;
+      activeRoom.set(room);
+      clearUnread(room); // viewing it now → no longer unread
       messages.set((f as { messages: ChatMessage[] }).messages);
     } else if (f.type === "message") {
       const msg = (f as { message: ChatMessage }).message;
       if (msg.room_id !== get(activeRoom)) return; // not the open room
       messages.update((all) => [...all, msg]);
+    } else if (f.type === "client-notice") {
+      const n = (f as { notice: ClientNotice }).notice;
+      // Server only sends these cross-room, but guard anyway.
+      if (n.room_id !== get(activeRoom)) {
+        unread.update((u) => ({ ...u, [n.room_id]: (u[n.room_id] ?? 0) + 1 }));
+        clientNoticeHandler?.(n);
+      }
     } else if (f.type.startsWith("call-")) {
       signalHandler?.(f);
     }
@@ -160,6 +197,7 @@ export function joinRoom(room_id: string): void {
   if (get(activeRoom) === room_id) return;
   activeRoom.set(room_id);
   replyingTo.set(null); // a reply target doesn't carry across rooms
+  clearUnread(room_id);
   messages.set([]); // history frame will repopulate
   if (ws?.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: "join", room_id }));

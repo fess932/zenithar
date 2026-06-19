@@ -4,7 +4,7 @@ use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 
 use crate::calls::CallRegistry;
-use crate::models::{ChatMessage, Signal};
+use crate::models::{ChatMessage, ClientNotice, Signal};
 use crate::storage::Storage;
 use crate::writer::WriteTx;
 
@@ -23,6 +23,9 @@ pub struct AppState {
     pub signal: broadcast::Sender<Signal>,
     /// Live voice calls; the server is the WebRTC peer in the media path.
     pub calls: Arc<CallRegistry>,
+    /// Heads-up fan-out for new anonymous-client messages (delivered to all
+    /// employee sockets, cross-room).
+    pub notify: broadcast::Sender<ClientNotice>,
     /// Set Secure on auth cookies (enable behind TLS).
     pub secure_cookies: bool,
 }

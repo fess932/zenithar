@@ -51,6 +51,17 @@ pub struct RoomSummary {
     pub created_at: i64,
 }
 
+/// A cross-room heads-up for employees: an anonymous client just wrote in their
+/// room. Fanned out to every employee socket regardless of the room they're
+/// viewing — the full message itself still only enters its own room's transcript.
+#[derive(Clone, Debug, Serialize)]
+pub struct ClientNotice {
+    pub room_id: String,
+    pub from_name: String,
+    pub preview: String,
+    pub created_at: i64,
+}
+
 /// A live participant in a call (for the call-state UI).
 #[derive(Clone, Debug, Serialize)]
 pub struct CallParticipant {
@@ -116,6 +127,8 @@ pub enum Outbound {
     },
     /// The call is over (last participant left).
     CallEnded { call_id: String },
+    /// A new message landed in an anonymous client room (employees only).
+    ClientNotice { notice: ClientNotice },
 }
 
 /// An addressed signaling frame fanned out over the `signal` broadcast channel.

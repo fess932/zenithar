@@ -173,6 +173,7 @@ async fn main() -> Result<()> {
 
     let (broadcast_tx, _) = broadcast::channel::<models::ChatMessage>(256);
     let (signal_tx, _) = broadcast::channel::<models::Signal>(256);
+    let (notify_tx, _) = broadcast::channel::<models::ClientNotice>(256);
 
     // STUN servers for WebRTC ICE (comma-separated). Empty is fine on a LAN /
     // localhost (host candidates) — the server has a public IP, so no TURN.
@@ -197,6 +198,7 @@ async fn main() -> Result<()> {
         storage,
         signal: signal_tx,
         calls,
+        notify: notify_tx,
         secure_cookies,
     };
 
