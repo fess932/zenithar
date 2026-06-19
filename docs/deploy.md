@@ -61,7 +61,10 @@ can't connect (`ICE failed` on the client, `could not get server reflexive
 address … deadline has elapsed` on the server). This is the common self-host
 case.
 
-Fix: advertise the public IP as a host candidate (NAT 1:1). No STUN/TURN needed.
+Fix: advertise the public IP (NAT 1:1). The server adds a server-reflexive
+candidate with the public IP **and keeps its private host candidate**, so a
+caller on the same LAN still connects directly (no NAT hairpin) and an external
+caller uses the public one. No STUN/TURN needed.
 
 ```yaml
     environment:

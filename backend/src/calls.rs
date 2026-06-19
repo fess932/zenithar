@@ -120,13 +120,18 @@ impl CallRegistry {
         let mut registry = Registry::new();
         registry = register_default_interceptors(registry, &mut media)?;
 
-        // Behind NAT (typical self-host: cloud 1:1 NAT or a home server), the only
-        // candidates the OS sees are private, so a remote browser can't connect.
-        // Advertising the public IP as a host candidate (NAT 1:1) makes the server
-        // reachable without depending on STUN — which is often blocked anyway.
+        // Behind NAT (typical self-host: cloud 1:1 NAT or a home server / DMZ),
+        // the only addresses the OS sees are private, so a remote browser can't
+        // connect. Advertise the public IP (NAT 1:1) without depending on STUN
+        // (often blocked anyway). Use the **Srflx** mapping, not Host: Srflx ADDS
+        // a server-reflexive candidate with the public IP while KEEPING the
+        // private host candidate. So a caller on the same LAN connects directly
+        // over the host candidate (no NAT-hairpin needed), and an external caller
+        // uses the public srflx candidate. Host mode would *replace* the private
+        // address, breaking same-LAN calls.
         let mut setting = SettingEngine::default();
         if !public_ips.is_empty() {
-            setting.set_nat_1to1_ips(public_ips, RTCIceCandidateType::Host);
+            setting.set_nat_1to1_ips(public_ips, RTCIceCandidateType::Srflx);
         }
 
         let api = APIBuilder::new()
