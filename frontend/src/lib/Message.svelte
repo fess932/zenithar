@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { type ChatMessage, replyingTo, highlightId, flashMessage } from "./chat";
+  import { type ChatMessage, highlightId, flashMessage } from "./chat";
   import { me } from "./session";
   import { t } from "./i18n";
   import VoicePlayer from "./VoicePlayer.svelte";
   import { openLightbox } from "./lightbox";
+  import { openMessageMenu } from "./messageMenu";
 
   export let m: ChatMessage;
 
@@ -14,8 +15,46 @@
     ? m.reply_to.body.trim() || (m.reply_to.has_attachment ? $t("attachment") : "")
     : "";
 
-  function startReply(): void {
-    replyingTo.set(m);
+  // Open the context menu: long-press on touch, plain click on desktop. (Clicks
+  // on interactive children — images, attachments, the quote — are left alone.)
+  let pressTimer: ReturnType<typeof setTimeout> | null = null;
+  let pressX = 0;
+  let pressY = 0;
+  let lastType = "mouse";
+
+  function clearPress(): void {
+    if (pressTimer) {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    }
+  }
+
+  function onPointerDown(e: PointerEvent): void {
+    lastType = e.pointerType;
+    if (e.pointerType === "mouse") return; // desktop opens on click instead
+    pressX = e.clientX;
+    pressY = e.clientY;
+    clearPress();
+    pressTimer = setTimeout(() => {
+      navigator.vibrate?.(15);
+      openMessageMenu(m, pressX, pressY);
+    }, 450);
+  }
+
+  function onPointerMove(e: PointerEvent): void {
+    if (pressTimer && (Math.abs(e.clientX - pressX) > 10 || Math.abs(e.clientY - pressY) > 10)) {
+      clearPress();
+    }
+  }
+
+  function isInteractive(target: EventTarget | null): boolean {
+    return target instanceof Element && target.closest("button, a") !== null;
+  }
+
+  function onRowClick(e: MouseEvent): void {
+    if (lastType !== "mouse") return; // touch is handled by long-press
+    if (isInteractive(e.target)) return; // let the child (image/quote/link) act
+    openMessageMenu(m, e.clientX, e.clientY);
   }
 
   // Jump to the quoted original (if still in the loaded window) and flash it.
@@ -44,7 +83,21 @@
   const thumb = (id: string) => `/api/attachments/${id}/thumb`;
 </script>
 
-<div class="line arrived group relative" class:mine class:flash={$highlightId === m.id} data-mid={m.id}>
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<div
+  class="line arrived"
+  class:mine
+  class:flash={$highlightId === m.id}
+  data-mid={m.id}
+  onpointerdown={onPointerDown}
+  onpointermove={onPointerMove}
+  onpointerup={clearPress}
+  onpointercancel={clearPress}
+  onclick={onRowClick}
+  oncontextmenu={(e) => e.preventDefault()}
+  role="listitem"
+>
   <span class="time">{fmtTime(m.created_at)}</span>
   <span class="who">{mine ? $t("you") : m.author_name}</span>
   <div class="body">
@@ -102,15 +155,4 @@
       </div>
     {/if}
   </div>
-
-  <!-- Reply action: appears on hover (desktop) / dimmed-always (touch). -->
-  <button
-    type="button"
-    onclick={startReply}
-    aria-label={$t("reply")}
-    title={$t("reply")}
-    class="absolute right-2 top-1 grid size-7 place-items-center rounded border border-line bg-surface text-muted opacity-0 transition hover:text-beacon focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-60"
-  >
-    ↩
-  </button>
 </div>

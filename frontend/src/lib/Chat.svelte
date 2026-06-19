@@ -7,6 +7,8 @@
   import { fly } from "svelte/transition";
   import Call from "./Call.svelte";
   import Lightbox from "./Lightbox.svelte";
+  import MessageMenu from "./MessageMenu.svelte";
+  import { closeMessageMenu } from "./messageMenu";
   import { initCallSignaling } from "./call";
   import {
     messages,
@@ -49,6 +51,14 @@
 
   function onScroll(): void {
     pinned = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 80;
+    closeMessageMenu(); // a floating menu shouldn't trail the scroll
+  }
+
+  function scrollToBottom(): void {
+    if (logEl) {
+      logEl.scrollTo({ top: logEl.scrollHeight, behavior: "smooth" });
+      pinned = true;
+    }
   }
 
   // Keep pinned to the newest line after each DOM update (not a reactive
@@ -77,33 +87,14 @@
 {#if view === "admin"}
   <Principals onBack={() => (view = "chat")} />
 {:else}
-  <div
-    class="grid h-dvh bg-ink font-sans text-[15px] text-text {isEmployee
-      ? 'grid-rows-[auto_auto_1fr_auto]'
-      : 'grid-rows-[auto_1fr_auto]'}"
-  >
-    <Header onOpenAdmin={() => (view = "admin")} />
-
-    {#if isEmployee}
-      <div class="flex items-center gap-2 border-b border-line bg-surface px-3 py-2 sm:px-5">
-        <button
-          type="button"
-          onclick={openDrawer}
-          class="relative inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-md border border-line px-2 text-muted hover:text-text"
-          aria-label={$t("rooms")}
-        >
-          <span class="text-base leading-none">☰</span>
-          {#if totalUnread > 0}
-            <span
-              class="absolute -left-1 -top-1 grid min-w-[1.1rem] place-items-center rounded-full bg-beacon px-1 text-[0.68rem] font-medium leading-tight text-[#1a1206]"
-            >
-              {totalUnread}
-            </span>
-          {/if}
-          <span class="max-w-[60vw] truncate font-mono text-[0.8rem] text-text">{currentTitle}</span>
-        </button>
-      </div>
-    {/if}
+  <div class="grid h-dvh grid-rows-[auto_1fr_auto] bg-ink font-sans text-[15px] text-text">
+    <Header
+      onOpenAdmin={() => (view = "admin")}
+      {isEmployee}
+      roomTitle={currentTitle}
+      unreadTotal={totalUnread}
+      onOpenRooms={openDrawer}
+    />
 
     <main
       bind:this={logEl}
@@ -123,11 +114,28 @@
     <Composer />
   </div>
 
+  <!-- Jump to latest: shown only when scrolled up from the bottom -->
+  {#if !pinned}
+    <button
+      type="button"
+      onclick={scrollToBottom}
+      aria-label={$t("scrollToBottom")}
+      title={$t("scrollToBottom")}
+      transition:fly={{ y: 12, duration: 150 }}
+      class="fixed bottom-40 right-4 z-30 grid size-11 cursor-pointer place-items-center rounded-full border border-line bg-surface-2 text-lg text-muted shadow-lg hover:border-beacon hover:text-beacon"
+    >
+      ↓
+    </button>
+  {/if}
+
   <!-- Voice call: floating button / active bar / incoming ring (all fixed) -->
   <Call />
 
   <!-- In-app image viewer (opened from message attachments) -->
   <Lightbox />
+
+  <!-- Long-press / click context menu for a message (reply, …) -->
+  <MessageMenu />
 
   <!-- Notification toasts: new messages from anonymous client rooms -->
   {#if $toasts.length > 0}
@@ -194,12 +202,12 @@
   {#if drawerOpen}
     <button
       type="button"
-      aria-label={$t("rooms")}
+      aria-label={$t("dismiss")}
       onclick={() => (drawerOpen = false)}
       class="fixed inset-0 z-30 cursor-default bg-black/40"
     ></button>
     <aside
-      class="fixed left-0 top-0 z-40 flex h-dvh w-72 max-w-[85vw] flex-col gap-1 overflow-y-auto border-r border-line bg-surface p-3 pt-[calc(0.75rem+env(safe-area-inset-top))]"
+      class="fixed left-0 top-0 z-40 flex h-dvh w-72 max-w-[85vw] flex-col gap-1 overflow-y-auto border-r border-line bg-surface p-3 pt-[calc(0.75rem+env(safe-area-inset-top))] text-text"
     >
       <div class="mb-2 px-1 font-mono text-[0.72rem] uppercase tracking-[0.1em] text-muted">
         {$t("rooms")}

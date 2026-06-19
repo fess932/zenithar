@@ -73,7 +73,7 @@
     type="button"
     onclick={seek}
     aria-label="seek"
-    class="relative h-1.5 w-28 cursor-pointer rounded-full bg-line sm:w-40"
+    class="relative h-1.5 w-24 cursor-pointer rounded-full bg-line sm:w-40"
   >
     <span class="absolute inset-y-0 left-0 rounded-full bg-beacon" style="width:{pct}%"></span>
   </button>

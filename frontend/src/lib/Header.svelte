@@ -4,6 +4,10 @@
   import { me, renameMe, logout } from "./session";
 
   export let onOpenAdmin: () => void;
+  export let isEmployee = false;
+  export let roomTitle = "";
+  export let unreadTotal = 0;
+  export let onOpenRooms: () => void = () => {};
 
   const statusKey = {
     connecting: "connecting",
@@ -30,10 +34,30 @@
 <header
   class="relative flex items-center gap-2 border-b border-line bg-surface px-3 pt-[calc(0.7rem+env(safe-area-inset-top))] pb-[0.7rem] sm:gap-3.5 sm:px-5"
 >
-  <span class="text-[0.78rem] font-bold uppercase tracking-[0.2em] sm:text-[0.82rem] sm:tracking-[0.22em]"
-    >Zenithar</span
-  >
-  <span class="hidden font-mono text-[0.78rem] text-muted sm:inline">{$t("room")}</span>
+  {#if isEmployee}
+    <!-- Doubles as the room switcher: tap to open the drawer; label = current room. -->
+    <button
+      type="button"
+      onclick={onOpenRooms}
+      aria-label={$t("rooms")}
+      class="relative -ml-1 flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-muted hover:text-text"
+    >
+      <span class="text-lg leading-none">☰</span>
+      {#if unreadTotal > 0}
+        <span
+          class="absolute -left-0.5 -top-0.5 grid min-w-[1.05rem] place-items-center rounded-full bg-beacon px-1 text-[0.66rem] font-medium leading-tight text-[#1a1206]"
+        >
+          {unreadTotal}
+        </span>
+      {/if}
+      <span class="truncate font-mono text-[0.84rem] text-text">{roomTitle}</span>
+    </button>
+  {:else}
+    <span
+      class="text-[0.78rem] font-bold uppercase tracking-[0.2em] text-text sm:text-[0.82rem] sm:tracking-[0.22em]"
+      >Zenithar</span
+    >
+  {/if}
 
   <div class="ml-auto flex items-center gap-2 sm:gap-[1.1rem]">
     {#if $me}

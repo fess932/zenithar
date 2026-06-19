@@ -7,7 +7,7 @@
 import { test, expect } from "@playwright/test";
 
 const ADMIN_LINK = process.env.ADMIN_LINK!;
-const composer = /команде|team/i; // message placeholder (RU default / EN)
+const composer = /Написать|Write a message/i; // message placeholder (RU default / EN)
 
 test.describe.configure({ mode: "serial" });
 
@@ -16,8 +16,9 @@ test("browser: link login renders the chat and sends a message", async ({ page }
 
   // The token is dropped from the URL after the cookie is set.
   await expect(page).toHaveURL(/\/$/);
-  // App actually mounted (would be blank if assets failed to load).
-  await expect(page.getByText("Zenithar")).toBeVisible();
+  // App actually mounted (would be blank if assets failed to load). Employees
+  // see the room switcher in the header (which doubles as the brand slot).
+  await expect(page.getByRole("button", { name: /Чаты|Chats/ })).toBeVisible();
 
   const input = page.getByPlaceholder(composer);
   await expect(input).toBeVisible();
@@ -60,10 +61,10 @@ test("browser: reply quotes the original and jumps back to it", async ({ page })
   await input.press("Enter");
   await expect(page.getByText(orig)).toBeVisible();
 
-  // Open a reply on the original message's row (button is hover-revealed).
-  const origRow = page.locator(".line", { hasText: orig });
-  await origRow.hover();
-  await origRow.getByRole("button", { name: /Ответить|Reply/ }).click();
+  // Open the message menu (desktop: click the message): it offers Reply + Copy.
+  await page.getByText(orig).click();
+  await expect(page.getByRole("menuitem", { name: /Копировать|Copy/ })).toBeVisible();
+  await page.getByRole("menuitem", { name: /Ответить|Reply/ }).click();
 
   const reply = `reply-${Date.now()}`;
   await input.fill(reply);

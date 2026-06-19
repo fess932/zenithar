@@ -80,6 +80,15 @@
     animation: var(--animate-arrived);
   }
 
+  /* Touch: suppress the OS long-press callout/selection so our own message
+     menu can take over the gesture. Desktop keeps text selectable. */
+  @media (hover: none) {
+    .line {
+      -webkit-touch-callout: none;
+      user-select: none;
+    }
+  }
+
   @media (max-width: 560px) {
     .line {
       @apply grid-cols-[4.5rem_minmax(0,1fr)] px-3;
