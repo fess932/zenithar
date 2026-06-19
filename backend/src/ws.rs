@@ -46,6 +46,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
         .unwrap_or_else(|| COMMON_ROOM.to_string());
 
     let mut rx = state.broadcast.subscribe();
+    let mut sigrx = state.signal.subscribe();
     let (mut sender, mut receiver) = socket.split();
 
     // Initial transcript for the default room.
@@ -124,6 +125,59 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                             break; // writer gone
                         }
                     }
+                    Inbound::CallStart { room_id } => {
+                        if !call_access(&state, &principal, &client_room, &room_id).await {
+                            debug!(room = %room_id, "call start denied");
+                            continue;
+                        }
+                        match state.calls.join(&room_id, &principal.id, &principal.display_name).await {
+                            Ok((call_id, sdp)) => {
+                                let frame = Outbound::CallOffer { call_id, sdp };
+                                if let Ok(json) = serde_json::to_string(&frame) {
+                                    if sender.send(Message::Text(json.into())).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(e) => debug!(error = %e, "call start failed"),
+                        }
+                    }
+                    Inbound::CallAnswer { call_id, sdp } => {
+                        if let Err(e) = state.calls.answer(&call_id, &principal.id, sdp).await {
+                            debug!(error = %e, "call answer failed");
+                        }
+                    }
+                    Inbound::CallIce { call_id, candidate } => {
+                        if let Err(e) = state.calls.ice(&call_id, &principal.id, candidate).await {
+                            debug!(error = %e, "call ice failed");
+                        }
+                    }
+                    Inbound::CallLeave { call_id } => {
+                        state.calls.leave(&call_id, &principal.id).await;
+                    }
+                }
+            }
+
+            // Addressed signaling fan-out: deliver frames aimed at this principal,
+            // or room-scoped frames for the room this socket is viewing.
+            sig = sigrx.recv() => {
+                match sig {
+                    Ok(s) => {
+                        let deliver = match &s.target {
+                            Some(t) => *t == principal.id,
+                            None => s.room_id == active_room
+                                && s.exclude.as_deref() != Some(principal.id.as_str()),
+                        };
+                        if deliver {
+                            if let Ok(json) = serde_json::to_string(&s.frame) {
+                                if sender.send(Message::Text(json.into())).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Err(RecvError::Lagged(_)) => {}
+                    Err(RecvError::Closed) => break,
                 }
             }
 
@@ -146,6 +200,22 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
         }
     }
     info!("websocket closed");
+}
+
+/// Whether this socket's principal may start/join a call in `room_id`. Mirrors
+/// the chat join rule: clients are pinned to their own room, employees any room.
+async fn call_access(
+    state: &AppState,
+    principal: &Principal,
+    client_room: &Option<String>,
+    room_id: &str,
+) -> bool {
+    match client_room {
+        Some(room) => room_id == room,
+        None => db::can_access_room(&state.reads, &principal.kind, &principal.id, room_id)
+            .await
+            .unwrap_or(false),
+    }
 }
 
 /// Send a room's recent transcript as a single `history` frame.

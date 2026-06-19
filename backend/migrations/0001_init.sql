@@ -68,6 +68,18 @@ CREATE TABLE IF NOT EXISTS attachments (
     created_at   INTEGER NOT NULL
 );
 
+-- Voice calls (Phase 4). One call per room at a time; the server is the WebRTC
+-- peer in the middle. `recording_id` is filled by Phase 5 (server-side recording).
+CREATE TABLE IF NOT EXISTS calls (
+    id           TEXT PRIMARY KEY,          -- ULID = call_id
+    room_id      TEXT NOT NULL REFERENCES rooms(id),
+    started_by   TEXT NOT NULL REFERENCES principals(id),
+    started_at   INTEGER NOT NULL,          -- unix millis
+    ended_at     INTEGER,                   -- NULL while live
+    recording_id TEXT                       -- Phase 5: blob/attachment key
+);
+CREATE INDEX IF NOT EXISTS idx_calls_room ON calls(room_id);
+
 CREATE INDEX IF NOT EXISTS idx_messages_room_id ON messages(room_id, id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_msg_id ON messages(client_msg_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);

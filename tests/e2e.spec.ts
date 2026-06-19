@@ -154,6 +154,117 @@ test("browser: upload multiple images and they render in the transcript", async 
   await expect(imgs.first()).toHaveAttribute("src", /\/api\/attachments\//);
 });
 
+// --- WebRTC call signaling (deterministic: raw WS, no media) ---------------
+// Drives the `call-*` protocol over a raw WebSocket inside the page (the auth
+// cookie rides along), so we test the server's signaling plane — offer
+// generation, room-scoped ringing, and call teardown — without headless media.
+
+async function openWs(page: import("@playwright/test").Page): Promise<void> {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        const w = window as unknown as Record<string, unknown>;
+        w.__frames = [];
+        w.__waiters = [];
+        const ws = new WebSocket(`ws://${location.host}/ws`);
+        w.__ws = ws;
+        ws.onmessage = (e) => {
+          const f = JSON.parse(e.data);
+          (w.__frames as unknown[]).push(f);
+          w.__waiters = (w.__waiters as { type: string; resolve: (f: unknown) => void }[]).filter(
+            (wt) => {
+              if (wt.type === f.type) {
+                wt.resolve(f);
+                return false;
+              }
+              return true;
+            },
+          );
+        };
+        ws.onopen = () => resolve();
+      }),
+  );
+}
+
+async function waitFrame(
+  page: import("@playwright/test").Page,
+  type: string,
+): Promise<Record<string, unknown>> {
+  return (await page.evaluate(
+    (type) =>
+      new Promise<unknown>((resolve, reject) => {
+        const w = window as unknown as Record<string, unknown>;
+        const existing = (w.__frames as { type: string }[]).find((f) => f.type === type);
+        if (existing) return resolve(existing);
+        const to = setTimeout(() => reject(new Error("timeout waiting for " + type)), 8000);
+        (w.__waiters as unknown[]).push({
+          type,
+          resolve: (f: unknown) => {
+            clearTimeout(to);
+            resolve(f);
+          },
+        });
+      }),
+    type,
+  )) as Record<string, unknown>;
+}
+
+async function sendFrame(
+  page: import("@playwright/test").Page,
+  frame: Record<string, unknown>,
+): Promise<void> {
+  await page.evaluate((frame) => {
+    (window as unknown as { __ws: WebSocket }).__ws.send(JSON.stringify(frame));
+  }, frame);
+}
+
+test("browser: call signaling — start offers, rings the room, leave ends it", async ({
+  page,
+  browser,
+}) => {
+  // Admin logs in, then mints a second employee and signs them in elsewhere.
+  await page.goto(ADMIN_LINK);
+  const created = await page.evaluate(async () => {
+    const r = await fetch("/api/principals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "user" }),
+    });
+    return r.json();
+  });
+  expect(created.url).toContain("/i/");
+
+  const ctx = await browser.newContext();
+  const emp = await ctx.newPage();
+  await emp.goto(created.url);
+  await expect(emp.getByPlaceholder(composer)).toBeVisible();
+
+  // Both open a raw WS; employees default to the common room.
+  await openWs(page);
+  await openWs(emp);
+
+  // Admin starts a call in common → the server answers with an SDP offer…
+  await sendFrame(page, { type: "call-start", room_id: "common" });
+  const offer = await waitFrame(page, "call-offer");
+  expect(typeof offer.sdp).toBe("string");
+  expect(offer.sdp as string).toContain("m=audio"); // a real Opus offer
+  const callId = offer.call_id as string;
+  expect(callId).toBeTruthy();
+
+  // …and rings the rest of the room (the other employee).
+  const ring = await waitFrame(emp, "call-ringing");
+  expect(ring.room_id).toBe("common");
+  expect(ring.call_id).toBe(callId);
+  expect(ring.from).toBeTruthy();
+
+  // Admin (the only participant) leaves → the call ends for the room.
+  await sendFrame(page, { type: "call-leave", call_id: callId });
+  const ended = await waitFrame(emp, "call-ended");
+  expect(ended.call_id).toBe(callId);
+
+  await ctx.close();
+});
+
 test("api: create an anonymous client (link + room)", async ({ playwright, baseURL }) => {
   const admin = await playwright.request.newContext({ baseURL });
   await admin.get(ADMIN_LINK);

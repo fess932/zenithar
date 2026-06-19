@@ -13,6 +13,7 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 mod auth;
+mod calls;
 mod db;
 mod models;
 mod names;
@@ -138,6 +139,22 @@ async fn main() -> Result<()> {
     tokio::spawn(writer::run(write_pool.clone(), write_rx));
 
     let (broadcast_tx, _) = broadcast::channel::<models::ChatMessage>(256);
+    let (signal_tx, _) = broadcast::channel::<models::Signal>(256);
+
+    // STUN servers for WebRTC ICE (comma-separated). Empty is fine on a LAN /
+    // localhost (host candidates) — the server has a public IP, so no TURN.
+    let stun: Vec<String> = std::env::var("ZENITHAR_STUN")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    let calls = Arc::new(calls::CallRegistry::new(
+        stun,
+        signal_tx.clone(),
+        write_pool.clone(),
+    )?);
 
     let state = AppState {
         writes: write_tx,
@@ -145,6 +162,8 @@ async fn main() -> Result<()> {
         reads,
         db: write_pool,
         storage,
+        signal: signal_tx,
+        calls,
         secure_cookies,
     };
 

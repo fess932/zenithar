@@ -24,6 +24,9 @@ sha2 = "0.10"
 base64 = "0.22"
 time = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+# WebRTC voice calls (Phase 4): server is the peer in the media path (ICE/DTLS/
+# SRTP/RTP terminate here), so Phase 5 can record the Opus it already forwards.
+webrtc = "0.17"
 
 [profile.dev]
 # bundled SQLite C compile is the slow part; keep our code fast to iterate

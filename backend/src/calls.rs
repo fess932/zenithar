@@ -1,0 +1,363 @@
+//! Voice calls — the server is the WebRTC peer in the middle (SFU-lite).
+//!
+//! Every browser negotiates exactly **one** `RTCPeerConnection` with the server.
+//! The server terminates DTLS/SRTP, so it holds each participant's decrypted Opus
+//! RTP and simply forwards every packet to the other participants in the same
+//! call. Because the media already passes through here, Phase 5 (server-side
+//! recording) is a tap on the forward loop — not a second media path.
+//!
+//! Topology per call (1:1 today, extends to N without a protocol change):
+//! ```text
+//! browser A ─DTLS/SRTP─▶ RTCPeerConnection A ─┐
+//!                                             ├─ forward RTP ─▶ the other peers
+//! browser B ─DTLS/SRTP─▶ RTCPeerConnection B ─┘   (+ Phase 5: write to .ogg)
+//! ```
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, Weak};
+
+use anyhow::Result;
+use tokio::sync::broadcast;
+use tracing::{debug, warn};
+use ulid::Ulid;
+use webrtc::api::interceptor_registry::register_default_interceptors;
+use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS};
+use webrtc::api::{APIBuilder, API};
+use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
+use webrtc::ice_transport::ice_server::RTCIceServer;
+use webrtc::interceptor::registry::Registry;
+use webrtc::peer_connection::configuration::RTCConfiguration;
+use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
+use webrtc::peer_connection::RTCPeerConnection;
+use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
+use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
+use webrtc::track::track_local::{TrackLocal, TrackLocalWriter};
+use webrtc::track::track_remote::TrackRemote;
+
+use crate::models::{CallParticipant, Outbound, Signal};
+
+/// One person's leg of a call: their server-side PeerConnection plus the local
+/// track that carries *the other participants'* audio down to them.
+struct Participant {
+    id: String,
+    name: String,
+    pc: Arc<RTCPeerConnection>,
+    /// Audio we write toward this participant (fed from everyone else's RTP).
+    send_track: Arc<TrackLocalStaticRTP>,
+}
+
+/// A live call in one room. One per room for now.
+struct Call {
+    id: String,
+    room_id: String,
+    signal: broadcast::Sender<Signal>,
+    participants: Mutex<HashMap<String, Arc<Participant>>>,
+}
+
+impl Call {
+    /// Snapshot of every other participant's send-track (so the per-packet
+    /// forward loop never holds the lock across an `.await`).
+    fn other_send_tracks(&self, except: &str) -> Vec<Arc<TrackLocalStaticRTP>> {
+        self.participants
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|p| p.id != except)
+            .map(|p| p.send_track.clone())
+            .collect()
+    }
+
+    fn roster(&self) -> Vec<CallParticipant> {
+        self.participants
+            .lock()
+            .unwrap()
+            .values()
+            .map(|p| CallParticipant {
+                id: p.id.clone(),
+                name: p.name.clone(),
+            })
+            .collect()
+    }
+
+    fn emit(&self, target: Option<String>, exclude: Option<String>, frame: Outbound) {
+        let _ = self.signal.send(Signal {
+            room_id: self.room_id.clone(),
+            target,
+            exclude,
+            frame,
+        });
+    }
+}
+
+/// Owns every live call and the shared WebRTC `API` (media engine + interceptors).
+pub struct CallRegistry {
+    api: API,
+    stun: Vec<String>,
+    signal: broadcast::Sender<Signal>,
+    db: sqlx::SqlitePool,
+    calls: Mutex<HashMap<String, Arc<Call>>>, // keyed by room_id
+}
+
+impl CallRegistry {
+    pub fn new(
+        stun: Vec<String>,
+        signal: broadcast::Sender<Signal>,
+        db: sqlx::SqlitePool,
+    ) -> Result<Self> {
+        let mut media = MediaEngine::default();
+        media.register_default_codecs()?;
+        let mut registry = Registry::new();
+        registry = register_default_interceptors(registry, &mut media)?;
+        let api = APIBuilder::new()
+            .with_media_engine(media)
+            .with_interceptor_registry(registry)
+            .build();
+        Ok(Self {
+            api,
+            stun,
+            signal,
+            db,
+            calls: Mutex::new(HashMap::new()),
+        })
+    }
+
+    fn ice_config(&self) -> RTCConfiguration {
+        RTCConfiguration {
+            ice_servers: if self.stun.is_empty() {
+                vec![]
+            } else {
+                vec![RTCIceServer {
+                    urls: self.stun.clone(),
+                    ..Default::default()
+                }]
+            },
+            ..Default::default()
+        }
+    }
+
+    fn find(&self, call_id: &str) -> Option<Arc<Call>> {
+        self.calls
+            .lock()
+            .unwrap()
+            .values()
+            .find(|c| c.id == call_id)
+            .cloned()
+    }
+
+    /// Start (or join) the call in `room_id` for this principal. Builds their
+    /// server PeerConnection, returns the SDP offer to send back to them, and
+    /// rings the rest of the room.
+    pub async fn join(
+        &self,
+        room_id: &str,
+        principal_id: &str,
+        principal_name: &str,
+    ) -> Result<(String, String)> {
+        // Get or create the room's call.
+        let (call, created) = {
+            let mut map = self.calls.lock().unwrap();
+            if let Some(c) = map.get(room_id) {
+                (c.clone(), false)
+            } else {
+                let call = Arc::new(Call {
+                    id: Ulid::new().to_string(),
+                    room_id: room_id.to_string(),
+                    signal: self.signal.clone(),
+                    participants: Mutex::new(HashMap::new()),
+                });
+                map.insert(room_id.to_string(), call.clone());
+                (call, true)
+            }
+        };
+        if created {
+            if let Err(e) = crate::db::insert_call(
+                &self.db,
+                &call.id,
+                room_id,
+                principal_id,
+                crate::now_millis(),
+            )
+            .await
+            {
+                warn!(error = %e, "failed to log call start");
+            }
+        }
+
+        // Build this participant's PeerConnection.
+        let pc = Arc::new(self.api.new_peer_connection(self.ice_config()).await?);
+
+        // The local track this participant will *receive* (others' audio mixed in).
+        let send_track = Arc::new(TrackLocalStaticRTP::new(
+            RTCRtpCodecCapability {
+                mime_type: MIME_TYPE_OPUS.to_owned(),
+                clock_rate: 48000,
+                channels: 2,
+                ..Default::default()
+            },
+            "audio".to_owned(),
+            format!("zenithar-{principal_id}"),
+        ));
+        let rtp_sender = pc
+            .add_track(Arc::clone(&send_track) as Arc<dyn TrackLocal + Send + Sync>)
+            .await?;
+        // Drain the sender's RTCP so interceptors (NACK/TWCC) run; ends on close.
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 1500];
+            while rtp_sender.read(&mut buf).await.is_ok() {}
+        });
+
+        // When this participant's microphone track arrives, forward every RTP
+        // packet to the other participants (and, later, the recorder).
+        let weak: Weak<Call> = Arc::downgrade(&call);
+        let me = principal_id.to_string();
+        pc.on_track(Box::new(move |track: Arc<TrackRemote>, _, _| {
+            let weak = weak.clone();
+            let me = me.clone();
+            Box::pin(async move {
+                tokio::spawn(async move {
+                    while let Ok((pkt, _)) = track.read_rtp().await {
+                        let Some(call) = weak.upgrade() else { break };
+                        for st in call.other_send_tracks(&me) {
+                            // SAFETY of audio quality: same Opus payload, just relayed.
+                            let _ = st.write_rtp(&pkt).await;
+                        }
+                        // Phase 5 recording tap goes here: recorder.write(&me, &pkt).
+                    }
+                });
+            })
+        }));
+
+        // Trickle the server's ICE candidates to this participant.
+        let sig = self.signal.clone();
+        let room = room_id.to_string();
+        let target = principal_id.to_string();
+        let call_id = call.id.clone();
+        pc.on_ice_candidate(Box::new(move |cand| {
+            let sig = sig.clone();
+            let room = room.clone();
+            let target = target.clone();
+            let call_id = call_id.clone();
+            Box::pin(async move {
+                let Some(cand) = cand else { return };
+                let Ok(init) = cand.to_json() else { return };
+                let Ok(candidate) = serde_json::to_string(&init) else {
+                    return;
+                };
+                let _ = sig.send(Signal {
+                    room_id: room,
+                    target: Some(target),
+                    exclude: None,
+                    frame: Outbound::CallIce { call_id, candidate },
+                });
+            })
+        }));
+
+        // Offer first, then register the participant so forwarding can find it.
+        let offer = pc.create_offer(None).await?;
+        pc.set_local_description(offer.clone()).await?;
+
+        let participant = Arc::new(Participant {
+            id: principal_id.to_string(),
+            name: principal_name.to_string(),
+            pc,
+            send_track,
+        });
+        call.participants
+            .lock()
+            .unwrap()
+            .insert(principal_id.to_string(), participant);
+
+        // Ring the room (others) and broadcast the updated roster.
+        call.emit(
+            None,
+            Some(principal_id.to_string()),
+            Outbound::CallRinging {
+                call_id: call.id.clone(),
+                room_id: room_id.to_string(),
+                from: principal_id.to_string(),
+                from_name: principal_name.to_string(),
+            },
+        );
+        call.emit(
+            None,
+            None,
+            Outbound::CallState {
+                call_id: call.id.clone(),
+                participants: call.roster(),
+            },
+        );
+
+        Ok((call.id.clone(), offer.sdp))
+    }
+
+    /// Apply a participant's SDP answer to the server's offer.
+    pub async fn answer(&self, call_id: &str, principal_id: &str, sdp: String) -> Result<()> {
+        let Some(call) = self.find(call_id) else {
+            debug!(call_id, "answer for unknown call");
+            return Ok(());
+        };
+        let pc = {
+            let map = call.participants.lock().unwrap();
+            map.get(principal_id).map(|p| p.pc.clone())
+        };
+        if let Some(pc) = pc {
+            pc.set_remote_description(RTCSessionDescription::answer(sdp)?)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Add a participant's trickled ICE candidate.
+    pub async fn ice(&self, call_id: &str, principal_id: &str, candidate: String) -> Result<()> {
+        let Some(call) = self.find(call_id) else {
+            return Ok(());
+        };
+        let pc = {
+            let map = call.participants.lock().unwrap();
+            map.get(principal_id).map(|p| p.pc.clone())
+        };
+        if let Some(pc) = pc {
+            let init: RTCIceCandidateInit = serde_json::from_str(&candidate)?;
+            pc.add_ice_candidate(init).await?;
+        }
+        Ok(())
+    }
+
+    /// A participant leaves. Closes their PeerConnection; when the call empties
+    /// it is dropped (finalizing any Phase 5 recording) and the room told.
+    pub async fn leave(&self, call_id: &str, principal_id: &str) {
+        let Some(call) = self.find(call_id) else {
+            return;
+        };
+        let (participant, now_empty) = {
+            let mut map = call.participants.lock().unwrap();
+            let p = map.remove(principal_id);
+            (p, map.is_empty())
+        };
+        if let Some(p) = participant {
+            let _ = p.pc.close().await;
+        }
+        if now_empty {
+            self.calls.lock().unwrap().remove(&call.room_id);
+            if let Err(e) = crate::db::end_call(&self.db, &call.id, crate::now_millis()).await {
+                warn!(error = %e, "failed to log call end");
+            }
+            call.emit(
+                None,
+                None,
+                Outbound::CallEnded {
+                    call_id: call.id.clone(),
+                },
+            );
+        } else {
+            call.emit(
+                None,
+                None,
+                Outbound::CallState {
+                    call_id: call.id.clone(),
+                    participants: call.roster(),
+                },
+            );
+        }
+    }
+}

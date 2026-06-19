@@ -34,10 +34,37 @@ export interface RoomSummary {
 
 export type Status = "connecting" | "live" | "down";
 
-// Server → client frames.
+// Server → client frames. Chat frames are handled here; `call-*` signaling
+// frames are forwarded to a handler registered by the call layer.
 type Frame =
   | { type: "history"; room_id: string; messages: ChatMessage[] }
-  | { type: "message"; message: ChatMessage };
+  | { type: "message"; message: ChatMessage }
+  | { type: string; [k: string]: unknown };
+
+/// A unique id that works outside secure contexts too. `crypto.randomUUID` is
+/// only defined on HTTPS/localhost, so over a plain-HTTP LAN IP it throws — this
+/// falls back to a random-enough id there.
+export function uuid(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}-${Math.random()
+    .toString(16)
+    .slice(2)}`;
+}
+
+// The call layer registers here to receive `call-*` signaling frames.
+let signalHandler: ((f: Frame) => void) | null = null;
+export function onSignal(handler: (f: Frame) => void): void {
+  signalHandler = handler;
+}
+
+/// Send a raw frame over the shared socket. Returns false if it isn't open.
+export function sendFrame(frame: unknown): boolean {
+  if (ws?.readyState !== WebSocket.OPEN) return false;
+  ws.send(JSON.stringify(frame));
+  return true;
+}
 
 export const messages = writable<ChatMessage[]>([]);
 export const status = writable<Status>("connecting");
@@ -88,11 +115,14 @@ export function connect(): void {
       return; // ignore non-JSON frames
     }
     if (f.type === "history") {
-      activeRoom.set(f.room_id);
-      messages.set(f.messages);
+      activeRoom.set((f as { room_id: string }).room_id);
+      messages.set((f as { messages: ChatMessage[] }).messages);
     } else if (f.type === "message") {
-      if (f.message.room_id !== get(activeRoom)) return; // not the open room
-      messages.update((all) => [...all, f.message]);
+      const msg = (f as { message: ChatMessage }).message;
+      if (msg.room_id !== get(activeRoom)) return; // not the open room
+      messages.update((all) => [...all, msg]);
+    } else if (f.type.startsWith("call-")) {
+      signalHandler?.(f);
     }
   };
   ws.onclose = () => {
@@ -122,7 +152,7 @@ export function send(body: string, attachmentIds: string[] = []): boolean {
     JSON.stringify({
       type: "msg",
       body,
-      client_msg_id: crypto.randomUUID(),
+      client_msg_id: uuid(),
       attachment_ids: attachmentIds,
     }),
   );

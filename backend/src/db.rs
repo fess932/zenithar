@@ -250,6 +250,48 @@ pub async fn room_exists(reads: &SqlitePool, room_id: &str) -> sqlx::Result<bool
     Ok(row.is_some())
 }
 
+/// Whether a principal may access a room: employees see every room; a client
+/// only its own. Used to gate both chat joins and call start/join.
+pub async fn can_access_room(
+    reads: &SqlitePool,
+    principal_kind: &str,
+    principal_id: &str,
+    room_id: &str,
+) -> sqlx::Result<bool> {
+    if principal_kind == "user" {
+        return room_exists(reads, room_id).await;
+    }
+    Ok(room_of_client(reads, principal_id).await?.as_deref() == Some(room_id))
+}
+
+/// Record the start of a call (Phase 5 later sets `recording_id` + `ended_at`).
+pub async fn insert_call(
+    write: &SqlitePool,
+    id: &str,
+    room_id: &str,
+    started_by: &str,
+    started_at: i64,
+) -> sqlx::Result<()> {
+    sqlx::query("INSERT INTO calls (id, room_id, started_by, started_at) VALUES (?1, ?2, ?3, ?4)")
+        .bind(id)
+        .bind(room_id)
+        .bind(started_by)
+        .bind(started_at)
+        .execute(write)
+        .await?;
+    Ok(())
+}
+
+/// Mark a call ended (idempotent — only sets `ended_at` while still NULL).
+pub async fn end_call(write: &SqlitePool, id: &str, ended_at: i64) -> sqlx::Result<()> {
+    sqlx::query("UPDATE calls SET ended_at = ?2 WHERE id = ?1 AND ended_at IS NULL")
+        .bind(id)
+        .bind(ended_at)
+        .execute(write)
+        .await?;
+    Ok(())
+}
+
 /// Rooms an employee can see: common first, then each client room (titled with
 /// the client's display name), oldest client first.
 pub async fn list_rooms_for_user(reads: &SqlitePool) -> sqlx::Result<Vec<RoomSummary>> {

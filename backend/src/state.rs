@@ -3,7 +3,8 @@ use std::sync::Arc;
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 
-use crate::models::ChatMessage;
+use crate::calls::CallRegistry;
+use crate::models::{ChatMessage, Signal};
 use crate::storage::Storage;
 use crate::writer::WriteTx;
 
@@ -18,6 +19,10 @@ pub struct AppState {
     pub db: SqlitePool,
     /// Blob backend for attachments (disk now; S3-swappable later).
     pub storage: Arc<dyn Storage>,
+    /// Addressed WebRTC signaling fan-out (call offers/answers/ICE/state).
+    pub signal: broadcast::Sender<Signal>,
+    /// Live voice calls; the server is the WebRTC peer in the media path.
+    pub calls: Arc<CallRegistry>,
     /// Set Secure on auth cookies (enable behind TLS).
     pub secure_cookies: bool,
 }

@@ -4,6 +4,8 @@
   import Composer from "./Composer.svelte";
   import Message from "./Message.svelte";
   import Principals from "./Principals.svelte";
+  import Call from "./Call.svelte";
+  import { initCallSignaling } from "./call";
   import {
     messages,
     connect,
@@ -27,6 +29,7 @@
 
   onMount(() => {
     connect();
+    initCallSignaling();
     if (isEmployee) loadRooms();
   });
 
@@ -93,6 +96,9 @@
 
     <Composer />
   </div>
+
+  <!-- Voice call: floating button / active bar / incoming ring (all fixed) -->
+  <Call />
 
   <!-- Error toast -->
   {#if $notice}
