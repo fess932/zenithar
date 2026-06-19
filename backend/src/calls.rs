@@ -25,7 +25,6 @@ use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS};
 use webrtc::api::setting_engine::SettingEngine;
 use webrtc::api::{APIBuilder, API};
-use webrtc::ice::network_type::NetworkType;
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 use webrtc::ice_transport::ice_candidate_type::RTCIceCandidateType;
 use webrtc::ice_transport::ice_server::RTCIceServer;
@@ -123,22 +122,17 @@ impl CallRegistry {
 
         // Behind NAT (typical self-host: cloud 1:1 NAT or a home server / DMZ),
         // the only addresses the OS sees are private, so a remote browser can't
-        // connect. Advertise the public IP (NAT 1:1) without depending on STUN
-        // (often blocked anyway). Use the **Srflx** mapping, not Host: Srflx ADDS
-        // a server-reflexive candidate with the public IP while KEEPING the
-        // private host candidate. So a caller on the same LAN connects directly
-        // over the host candidate (no NAT-hairpin needed), and an external caller
-        // uses the public srflx candidate. Host mode would *replace* the private
-        // address, breaking same-LAN calls.
+        // connect. Advertise the public IP (NAT 1:1) as a host candidate without
+        // depending on STUN (often blocked anyway). This is what an EXTERNAL
+        // caller uses to reach the media path. (A caller on the *same LAN* as the
+        // server can't use it — pinging your own router's public IP from inside
+        // needs NAT hairpin, which most routers don't do — so test calls from a
+        // different network, e.g. mobile data. webrtc-rs 0.17's Srflx mapping mode,
+        // which would also keep the private candidate, doesn't trickle candidates
+        // reliably here, so we use Host.)
         let mut setting = SettingEngine::default();
         if !public_ips.is_empty() {
-            setting.set_nat_1to1_ips(public_ips, RTCIceCandidateType::Srflx);
-            // Restrict ICE to IPv4 UDP. The 1:1 mapping above only knows our IPv4
-            // public address, so an IPv6 (`[::]`) socket would gather a candidate
-            // the mapper can't translate ("external mapped IP not found") and the
-            // whole gather yields nothing. A NAT'd self-host has no usable IPv6
-            // anyway, so drop it and keep the media path on UDP/IPv4.
-            setting.set_network_types(vec![NetworkType::Udp4]);
+            setting.set_nat_1to1_ips(public_ips, RTCIceCandidateType::Host);
         }
 
         let api = APIBuilder::new()

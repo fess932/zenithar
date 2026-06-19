@@ -61,10 +61,13 @@ can't connect (`ICE failed` on the client, `could not get server reflexive
 address … deadline has elapsed` on the server). This is the common self-host
 case.
 
-Fix: advertise the public IP (NAT 1:1). The server adds a server-reflexive
-candidate with the public IP **and keeps its private host candidate**, so a
-caller on the same LAN still connects directly (no NAT hairpin) and an external
-caller uses the public one. No STUN/TURN needed.
+Fix: advertise the public IP (NAT 1:1). No STUN/TURN needed.
+
+> **Test from a different network (e.g. mobile data), not the server's own LAN.**
+> The server advertises its *public* IP, which an external caller reaches via the
+> DMZ. A caller on the **same LAN** as the server can't use it — pinging your own
+> router's public IP from inside needs NAT hairpin, which most routers don't do —
+> so a same-LAN test call will `ICE failed` even when the setup is correct.
 
 ```yaml
     environment:
