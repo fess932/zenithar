@@ -23,8 +23,10 @@ use tracing::{debug, warn};
 use ulid::Ulid;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS};
+use webrtc::api::setting_engine::SettingEngine;
 use webrtc::api::{APIBuilder, API};
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
+use webrtc::ice_transport::ice_candidate_type::RTCIceCandidateType;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
@@ -108,6 +110,7 @@ pub struct CallRegistry {
 impl CallRegistry {
     pub fn new(
         stun: Vec<String>,
+        public_ips: Vec<String>,
         signal: broadcast::Sender<Signal>,
         db: sqlx::SqlitePool,
         recordings_dir: PathBuf,
@@ -116,9 +119,20 @@ impl CallRegistry {
         media.register_default_codecs()?;
         let mut registry = Registry::new();
         registry = register_default_interceptors(registry, &mut media)?;
+
+        // Behind NAT (typical self-host: cloud 1:1 NAT or a home server), the only
+        // candidates the OS sees are private, so a remote browser can't connect.
+        // Advertising the public IP as a host candidate (NAT 1:1) makes the server
+        // reachable without depending on STUN — which is often blocked anyway.
+        let mut setting = SettingEngine::default();
+        if !public_ips.is_empty() {
+            setting.set_nat_1to1_ips(public_ips, RTCIceCandidateType::Host);
+        }
+
         let api = APIBuilder::new()
             .with_media_engine(media)
             .with_interceptor_registry(registry)
+            .with_setting_engine(setting)
             .build();
         Ok(Self {
             api,

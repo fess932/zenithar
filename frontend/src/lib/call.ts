@@ -3,7 +3,8 @@
 // participants and, later, records it). The server is always the offerer, so we
 // only ever answer. Signaling rides the shared chat WebSocket (see chat.ts).
 import { get, writable } from "svelte/store";
-import { onSignal, sendFrame } from "./chat";
+import { onSignal, sendFrame, notify } from "./chat";
+import { t } from "./i18n";
 
 export type CallState = "idle" | "ringing" | "connecting" | "live";
 
@@ -29,6 +30,11 @@ let localStream: MediaStream | null = null;
 let remoteAudio: HTMLAudioElement | null = null;
 let callId: string | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
+let connectTimer: ReturnType<typeof setTimeout> | null = null;
+
+// If we don't reach a live connection within this window, surface a failure
+// instead of sitting on "connecting…" forever (e.g. ICE can't traverse NAT).
+const CONNECT_TIMEOUT_MS = 20000;
 
 // Empty ICE list works on localhost/LAN (host candidates); the server has a
 // public IP, so no TURN. A public STUN can be added later if needed.
@@ -37,12 +43,33 @@ const RTC_CONFIG: RTCConfiguration = { iceServers: [] };
 /// Start a call in a room (or accept the one ringing — same handshake: we ask
 /// the server to add us, it answers with an SDP offer).
 export function startCall(roomId: string): void {
-  if (get(callState) !== "idle") return;
+  // Allowed both from idle (caller) and ringing (callee accepting) — the latter
+  // is why accepting did nothing before: the guard rejected the "ringing" state.
+  const st = get(callState);
+  if (st !== "idle" && st !== "ringing") return;
   callState.set("connecting");
   incoming.set(null);
   if (!sendFrame({ type: "call-start", room_id: roomId })) {
+    notify(get(t)("callFailed"));
     teardown();
+    return;
   }
+  armConnectWatchdog();
+}
+
+function armConnectWatchdog(): void {
+  clearConnectWatchdog();
+  connectTimer = setTimeout(() => {
+    if (get(callState) !== "live") {
+      notify(get(t)("callFailed"));
+      hangup();
+    }
+  }, CONNECT_TIMEOUT_MS);
+}
+
+function clearConnectWatchdog(): void {
+  if (connectTimer) clearTimeout(connectTimer);
+  connectTimer = null;
 }
 
 /// Accept the currently ringing call.
@@ -77,7 +104,8 @@ async function onOffer(id: string, sdp: string): Promise<void> {
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
   } catch {
-    // No mic / denied — bail out cleanly.
+    // No mic / denied — tell the user instead of failing silently.
+    notify(get(t)("callNoMic"));
     hangup();
     return;
   }
@@ -101,7 +129,12 @@ async function onOffer(id: string, sdp: string): Promise<void> {
   pc.onconnectionstatechange = () => {
     const st = pc?.connectionState;
     if (st === "connected") startTimer();
-    else if (st === "failed" || st === "closed" || st === "disconnected") hangup();
+    else if (st === "failed") {
+      notify(get(t)("callFailed")); // ICE couldn't connect (often NAT/firewall)
+      hangup();
+    } else if (st === "closed" || st === "disconnected") {
+      hangup();
+    }
   };
 
   await pc.setRemoteDescription({ type: "offer", sdp });
@@ -120,6 +153,7 @@ async function onIce(id: string, candidate: string): Promise<void> {
 }
 
 function startTimer(): void {
+  clearConnectWatchdog();
   if (timer) return;
   callState.set("live");
   callElapsed.set(0);
@@ -127,6 +161,7 @@ function startTimer(): void {
 }
 
 function teardown(): void {
+  clearConnectWatchdog();
   if (timer) clearInterval(timer);
   timer = null;
   localStream?.getTracks().forEach((tr) => tr.stop());

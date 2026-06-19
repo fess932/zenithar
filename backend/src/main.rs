@@ -189,6 +189,16 @@ async fn main() -> Result<()> {
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .collect();
+    // Public IP(s) to advertise as host candidates (NAT 1:1). Set this on a
+    // self-hosted server behind NAT so remote browsers can actually reach the
+    // media path — see docs/deploy.md. Empty = advertise only local candidates.
+    let public_ips: Vec<String> = std::env::var("ZENITHAR_PUBLIC_IP")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
     // Call recordings (Phase 5): one Ogg/Opus file per participant, on disk.
     let recordings_dir = std::env::var("ZENITHAR_RECORDINGS")
         .map(std::path::PathBuf::from)
@@ -197,6 +207,7 @@ async fn main() -> Result<()> {
 
     let calls = Arc::new(calls::CallRegistry::new(
         stun,
+        public_ips,
         signal_tx.clone(),
         write_pool.clone(),
         recordings_dir,

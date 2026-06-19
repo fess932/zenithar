@@ -89,5 +89,6 @@ mkdir -p data && docker compose up -d   # then open the admin link from the logs
 - `ZENITHAR_ATTACHMENTS` — uploads dir (default `<data>/attachments`)
 - `ZENITHAR_RECORDINGS` — call recordings dir (default `<data>/recordings`)
 - `ZENITHAR_STUN` — comma-separated STUN URLs for WebRTC ICE (empty = LAN/localhost)
+- `ZENITHAR_PUBLIC_IP` — public IP(s) to advertise for calls when behind NAT/DMZ (NAT 1:1); see [docs/deploy.md](docs/deploy.md)
 - `ZENITHAR_SECURE_COOKIES` — set `1`/`true` to mark auth cookies `Secure` (behind TLS)
 - `RUST_LOG` — log filter (default `info`)

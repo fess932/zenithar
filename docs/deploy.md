@@ -49,9 +49,30 @@ remove the `ports:` block and uncomment:
 ```
 
 The server then binds the host's interfaces directly and ICE can negotiate UDP.
-Since the server has a public IP, **no TURN** is required; STUN is enough (see
-`ZENITHAR_STUN`). Pinning a fixed UDP port range instead of host networking is a
-possible future refinement.
+Pinning a fixed UDP port range instead of host networking is a possible future
+refinement.
+
+### Server behind NAT / DMZ → set `ZENITHAR_PUBLIC_IP`
+
+If the box only has a **private** address on its interface (e.g. `10.51.0.10`)
+and is reached from outside via a **public IP that a router/DMZ forwards** to it,
+ICE will otherwise only gather that private candidate — and a remote browser
+can't connect (`ICE failed` on the client, `could not get server reflexive
+address … deadline has elapsed` on the server). This is the common self-host
+case.
+
+Fix: advertise the public IP as a host candidate (NAT 1:1). No STUN/TURN needed.
+
+```yaml
+    environment:
+      ZENITHAR_PUBLIC_IP: "203.0.113.7"   # your external IP (comma-separate for several)
+      ZENITHAR_STUN: ""                    # drop public STUN; it's not needed and may be blocked
+```
+
+The router/DMZ must forward UDP (and `:3000` TCP for signaling) to the server.
+With full port forwarding (DMZ) nothing else is required. **Do not rely on public
+STUN like Google's** — it's often blocked (e.g. from RU) and just stalls ICE
+gathering; `ZENITHAR_PUBLIC_IP` makes the server reachable deterministically.
 
 ---
 
@@ -97,6 +118,7 @@ Or, more surgically, stop advertising that global-scope ULA on the bridge.
 | `ZENITHAR_ATTACHMENTS` | `<data>/attachments` | Uploaded files on disk. |
 | `ZENITHAR_RECORDINGS` | `<data>/recordings` | Server-side call recordings (`<call_id>.<participant_id>.ogg`). |
 | `ZENITHAR_STUN` | — | Comma-separated STUN URLs for ICE. Empty = host candidates (LAN/localhost). |
+| `ZENITHAR_PUBLIC_IP` | — | Public IP(s) to advertise as host candidates (NAT 1:1). Set on a server behind NAT/DMZ so remote browsers can reach the media path. |
 | `ZENITHAR_SECURE_COOKIES` | `0` | `1`/`true` to mark the auth cookie `Secure` (behind TLS). |
 | `RUST_LOG` | `info` | Log filter (`tracing` env-filter syntax). |
 
