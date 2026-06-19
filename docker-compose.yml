@@ -1,0 +1,30 @@
+# Run Zenithar from a single container. Either build locally (`docker compose up
+# --build`) or pull the image published by CI (set `image:` and drop `build:`).
+#
+# First run prints the bootstrap admin login link to the logs and writes it to
+# /data/.env (persisted in the volume):  docker compose logs zenithar
+services:
+  zenithar:
+    build: .
+    image: ghcr.io/fess932/zenithar:latest
+    ports:
+      - "3000:3000" # HTTP + WebSocket (chat & call signaling)
+    volumes:
+      # Local ./data holds the SQLite DB, attachments, call recordings, and the
+      # bootstrap admin link. The container runs as uid 65532 (distroless
+      # nonroot), so the dir must be writable by it: rootless podman → append
+      # `:U` to auto-chown the mount; docker → `mkdir -p data && sudo chown
+      # 65532:65532 data` once.
+      - ./data:/data
+    environment:
+      RUST_LOG: info
+      # Behind TLS (reverse proxy), mark auth cookies Secure:
+      # ZENITHAR_SECURE_COOKIES: "1"
+      # STUN for WebRTC ICE (comma-separated). Empty works on a LAN/localhost.
+      # ZENITHAR_STUN: "stun:stun.l.google.com:19302"
+    restart: unless-stopped
+    # NOTE: real WebRTC *media* is UDP on ephemeral ports — bridged Docker
+    # networking won't forward those. On Linux use host networking for live
+    # calls (signaling over :3000 works either way; pinning a UDP range is a
+    # follow-up). Uncomment and remove `ports:` above:
+    # network_mode: host

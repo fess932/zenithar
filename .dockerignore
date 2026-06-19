@@ -1,0 +1,19 @@
+# Keep the build context small and reproducible — everything below is either
+# rebuilt inside the image or is local-only state.
+.git
+.github
+**/target
+**/node_modules
+**/dist
+frontend/dist
+data/
+**/data
+.env
+test-results/
+**/test-results
+**/*.log
+**/*.rs.bk
+.DS_Store
+docs/
+tests/
+*.md
