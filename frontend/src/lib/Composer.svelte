@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from "./i18n";
-  import { send, uploadFile, notify, type Attachment } from "./chat";
+  import { send, uploadFile, notify, replyingTo, type Attachment } from "./chat";
   import { EMOJI } from "./emoji";
 
   const MAX_ATTACH = 5;
@@ -33,6 +33,12 @@
 
   $: canSend = (body.trim().length > 0 || pending.length > 0) && !uploading;
 
+  // Preview text for the reply banner (parent body, or an attachment marker).
+  $: replyText = $replyingTo
+    ? $replyingTo.body.trim() ||
+      ($replyingTo.attachments.length > 0 ? $t("attachment") : "")
+    : "";
+
   function submit(e: SubmitEvent): void {
     e.preventDefault();
     if (!canSend) return;
@@ -40,11 +46,13 @@
       send(
         body.trim(),
         pending.map((a) => a.id),
+        $replyingTo?.id ?? null,
       )
     ) {
       body = "";
       pending = [];
       showEmoji = false;
+      replyingTo.set(null);
     }
   }
 
@@ -129,6 +137,27 @@
 </script>
 
 <div class="border-t border-line bg-surface px-3 pt-[0.6rem] pb-[calc(0.6rem+env(safe-area-inset-bottom))] sm:px-5">
+  <!-- reply target (Telegram-style): quoted line above the input -->
+  {#if $replyingTo}
+    <div class="mb-2 flex items-center gap-2 rounded-md border-l-2 border-beacon bg-surface-2 py-1 pl-2 pr-1">
+      <span class="grid shrink-0 place-items-center text-base text-beacon">↩</span>
+      <div class="min-w-0 flex-1">
+        <div class="font-mono text-[0.72rem] text-beacon">{$replyingTo.author_name}</div>
+        <div class="line-clamp-1 text-[0.8rem] text-muted">
+          {#if $replyingTo.attachments.length > 0 && !$replyingTo.body.trim()}📎 {/if}{replyText}
+        </div>
+      </div>
+      <button
+        type="button"
+        onclick={() => replyingTo.set(null)}
+        aria-label={$t("cancelReply")}
+        class="grid size-7 shrink-0 cursor-pointer place-items-center rounded text-muted hover:text-bad"
+      >
+        ✕
+      </button>
+    </div>
+  {/if}
+
   <!-- pending attachments (max 5) -->
   {#if pending.length > 0}
     <div class="mb-2 flex flex-wrap gap-2">

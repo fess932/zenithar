@@ -50,9 +50,39 @@ test("browser: a sent message survives a reload (persisted history)", async ({ p
   await expect(page.getByText(msg)).toBeVisible({ timeout: 10000 });
 });
 
+test("browser: reply quotes the original and jumps back to it", async ({ page }) => {
+  await page.goto(ADMIN_LINK);
+  await expect(page.locator('.beacon[data-state="live"]')).toBeVisible({ timeout: 10000 });
+
+  const orig = `orig-${Date.now()}`;
+  const input = page.getByPlaceholder(composer);
+  await input.fill(orig);
+  await input.press("Enter");
+  await expect(page.getByText(orig)).toBeVisible();
+
+  // Open a reply on the original message's row (button is hover-revealed).
+  const origRow = page.locator(".line", { hasText: orig });
+  await origRow.hover();
+  await origRow.getByRole("button", { name: /Ответить|Reply/ }).click();
+
+  const reply = `reply-${Date.now()}`;
+  await input.fill(reply);
+  await input.press("Enter");
+  await expect(page.getByText(reply)).toBeVisible();
+
+  // The reply message renders a quote containing the original text.
+  const replyRow = page.locator(".line", { hasText: reply });
+  await expect(replyRow.getByText(orig)).toBeVisible();
+
+  // Clicking the quote flashes the original row.
+  await replyRow.getByText(orig).click();
+  await expect(page.locator(".line.flash")).toBeVisible();
+});
+
 test("browser: admin self-rename sticks", async ({ page }) => {
   await page.goto(ADMIN_LINK);
-  await page.getByRole("button", { name: "admin" }).click();
+  // exact: the header's name button (reply-quote buttons can also contain "admin").
+  await page.getByRole("button", { name: "admin", exact: true }).click();
   const edit = page.getByLabel(/Изменить имя|Edit name/);
   await edit.fill("Chief");
   await edit.press("Enter");

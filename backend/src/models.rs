@@ -13,6 +13,17 @@ pub struct Attachment {
     pub has_thumb: bool,
 }
 
+/// A compact preview of the message a reply quotes (Telegram-style). Derived at
+/// read time from the parent row, so it always renders even if the original has
+/// scrolled out of the loaded window. `id` lets the client jump to the original.
+#[derive(Clone, Debug, Serialize)]
+pub struct ReplyPreview {
+    pub id: String,
+    pub author_name: String,
+    pub body: String,
+    pub has_attachment: bool,
+}
+
 /// A persisted / broadcast chat message. Attachments (0–5) are loaded separately
 /// and embedded, so this is not a direct `FromRow`.
 #[derive(Clone, Debug, Serialize)]
@@ -22,6 +33,9 @@ pub struct ChatMessage {
     pub author_id: String,
     pub author_name: String,
     pub body: String,
+    /// The quoted message, if this is a reply. The parent id is persisted in the
+    /// `messages.reply_to` column (see [`crate::writer`]).
+    pub reply_to: Option<ReplyPreview>,
     pub client_msg_id: Option<String>,
     pub created_at: i64, // unix millis
     pub attachments: Vec<Attachment>,
@@ -59,6 +73,9 @@ pub enum Inbound {
         client_msg_id: Option<String>,
         #[serde(default)]
         attachment_ids: Vec<String>,
+        /// Id of the message being replied to, if any.
+        #[serde(default)]
+        reply_to: Option<String>,
     },
     /// Start (or join) the call in a room. The server replies with `call-offer`.
     CallStart { room_id: String },

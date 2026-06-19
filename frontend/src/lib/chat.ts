@@ -14,12 +14,20 @@ export interface Attachment {
   has_thumb: boolean;
 }
 
+export interface ReplyPreview {
+  id: string;
+  author_name: string;
+  body: string;
+  has_attachment: boolean;
+}
+
 export interface ChatMessage {
   id: string;
   room_id: string;
   author_id: string;
   author_name: string;
   body: string;
+  reply_to: ReplyPreview | null;
   client_msg_id: string | null;
   created_at: number; // unix millis
   attachments: Attachment[];
@@ -70,6 +78,20 @@ export const messages = writable<ChatMessage[]>([]);
 export const status = writable<Status>("connecting");
 export const rooms = writable<RoomSummary[]>([]);
 export const activeRoom = writable<string | null>(null);
+
+/// The message the composer is currently replying to (Telegram-style), or null.
+export const replyingTo = writable<ChatMessage | null>(null);
+
+/// Briefly highlighted message id — set when jumping to a quoted original.
+export const highlightId = writable<string | null>(null);
+let highlightTimer: ReturnType<typeof setTimeout> | null = null;
+
+/// Flash a message (used after scrolling to a reply's original).
+export function flashMessage(id: string): void {
+  highlightId.set(id);
+  if (highlightTimer) clearTimeout(highlightTimer);
+  highlightTimer = setTimeout(() => highlightId.set(null), 1600);
+}
 
 /// Transient, user-visible error banner (also logged to the console).
 export const notice = writable<string | null>(null);
@@ -137,13 +159,18 @@ export function connect(): void {
 export function joinRoom(room_id: string): void {
   if (get(activeRoom) === room_id) return;
   activeRoom.set(room_id);
+  replyingTo.set(null); // a reply target doesn't carry across rooms
   messages.set([]); // history frame will repopulate
   if (ws?.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: "join", room_id }));
   }
 }
 
-export function send(body: string, attachmentIds: string[] = []): boolean {
+export function send(
+  body: string,
+  attachmentIds: string[] = [],
+  replyToId: string | null = null,
+): boolean {
   if (ws?.readyState !== WebSocket.OPEN) {
     flash(get(t)("errSend"));
     return false;
@@ -154,6 +181,7 @@ export function send(body: string, attachmentIds: string[] = []): boolean {
       body,
       client_msg_id: uuid(),
       attachment_ids: attachmentIds,
+      reply_to: replyToId,
     }),
   );
   return true;

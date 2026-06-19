@@ -49,7 +49,11 @@
 @layer components {
   /* Transcript row: time · who · message, collapsing on narrow screens. */
   .line {
-    @apply grid grid-cols-[5.5rem_8rem_1fr] gap-3 border-l-2 border-transparent px-5 py-[0.12rem];
+    @apply grid grid-cols-[5.5rem_8rem_1fr] gap-3 border-l-2 border-transparent px-5 py-[0.12rem] transition-colors duration-300;
+  }
+  /* Briefly highlighted when you jump to a quoted original. */
+  .line.flash {
+    @apply bg-surface-2;
   }
   .line:hover {
     @apply bg-surface;

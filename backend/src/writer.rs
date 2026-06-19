@@ -73,8 +73,8 @@ async fn write_batch(pool: &SqlitePool, batch: &[WriteCmd]) -> sqlx::Result<()> 
         let m = &cmd.msg;
         let inserted = sqlx::query(
             "INSERT INTO messages
-               (id, room_id, author_id, author_name, body, client_msg_id, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+               (id, room_id, author_id, author_name, body, reply_to, client_msg_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(client_msg_id) DO NOTHING",
         )
         .bind(&m.id)
@@ -82,6 +82,7 @@ async fn write_batch(pool: &SqlitePool, batch: &[WriteCmd]) -> sqlx::Result<()> 
         .bind(&m.author_id)
         .bind(&m.author_name)
         .bind(&m.body)
+        .bind(m.reply_to.as_ref().map(|r| r.id.as_str()))
         .bind(m.client_msg_id.as_deref())
         .bind(m.created_at)
         .execute(&mut *tx)

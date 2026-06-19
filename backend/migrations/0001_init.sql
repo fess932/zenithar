@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS messages (
     author_id     TEXT NOT NULL REFERENCES principals(id),
     author_name   TEXT NOT NULL,            -- denormalized display name at send time
     body          TEXT NOT NULL,
+    reply_to      TEXT REFERENCES messages(id), -- replied-to message (Telegram-style quote)
     client_msg_id TEXT,                      -- client UUID for idempotency
     created_at    INTEGER NOT NULL
 );
@@ -81,6 +82,7 @@ CREATE TABLE IF NOT EXISTS calls (
 CREATE INDEX IF NOT EXISTS idx_calls_room ON calls(room_id);
 
 CREATE INDEX IF NOT EXISTS idx_messages_room_id ON messages(room_id, id);
+CREATE INDEX IF NOT EXISTS idx_messages_reply_to ON messages(reply_to);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_msg_id ON messages(client_msg_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
 

@@ -90,7 +90,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                             break;
                         }
                     }
-                    Inbound::Msg { body, client_msg_id, attachment_ids } => {
+                    Inbound::Msg { body, client_msg_id, attachment_ids, reply_to } => {
                         // Resolve up to 5 attachments, each must belong to this room.
                         let mut attachments = Vec::new();
                         let mut bad = false;
@@ -108,12 +108,21 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                         if body.trim().is_empty() && attachments.is_empty() {
                             continue;
                         }
+                        // Resolve the quoted message (must be in this room); a
+                        // dangling reference is silently dropped, not rejected.
+                        let reply_to = match reply_to {
+                            Some(rid) => db::reply_preview(&state.reads, &rid, &active_room)
+                                .await
+                                .unwrap_or(None),
+                            None => None,
+                        };
                         let chat = ChatMessage {
                             id: Ulid::new().to_string(),
                             room_id: active_room.clone(),
                             author_id: principal.id.clone(),
                             author_name: principal.display_name.clone(),
                             body,
+                            reply_to,
                             client_msg_id,
                             created_at: crate::now_millis(),
                             attachments,

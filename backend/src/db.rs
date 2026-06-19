@@ -6,7 +6,7 @@ use sqlx::SqlitePool;
 
 use ulid::Ulid;
 
-use crate::models::{Attachment, ChatMessage, RoomSummary};
+use crate::models::{Attachment, ChatMessage, ReplyPreview, RoomSummary};
 
 const MIGRATION: &str = include_str!("../migrations/0001_init.sql");
 
@@ -65,6 +65,23 @@ struct MsgRow {
     body: String,
     client_msg_id: Option<String>,
     created_at: i64,
+    // Quoted parent (NULL unless this is a reply), filled by the self-join.
+    reply_id: Option<String>,
+    reply_author: Option<String>,
+    reply_body: Option<String>,
+    reply_has_att: i64,
+}
+
+impl MsgRow {
+    /// Fold the joined parent columns into a `ReplyPreview` (None unless a reply).
+    fn reply_preview(&self) -> Option<ReplyPreview> {
+        self.reply_id.as_ref().map(|id| ReplyPreview {
+            id: id.clone(),
+            author_name: self.reply_author.clone().unwrap_or_default(),
+            body: self.reply_body.clone().unwrap_or_default(),
+            has_attachment: self.reply_has_att != 0,
+        })
+    }
 }
 
 /// Attachment row carrying its owning message id (for grouping into messages).
@@ -87,8 +104,12 @@ pub async fn recent_messages(
     limit: i64,
 ) -> Result<Vec<ChatMessage>> {
     let rows = sqlx::query_as::<_, MsgRow>(
-        "SELECT id, room_id, author_id, author_name, body, client_msg_id, created_at
-         FROM messages WHERE room_id = ?1 ORDER BY id DESC LIMIT ?2",
+        "SELECT m.id, m.room_id, m.author_id, m.author_name, m.body, m.client_msg_id, m.created_at,
+                p.id AS reply_id, p.author_name AS reply_author, p.body AS reply_body,
+                EXISTS(SELECT 1 FROM attachments a WHERE a.message_id = p.id) AS reply_has_att
+         FROM messages m
+         LEFT JOIN messages p ON p.id = m.reply_to
+         WHERE m.room_id = ?1 ORDER BY m.id DESC LIMIT ?2",
     )
     .bind(room_id)
     .bind(limit)
@@ -127,17 +148,54 @@ pub async fn recent_messages(
     Ok(rows
         .into_iter()
         .rev()
-        .map(|r| ChatMessage {
-            attachments: by_msg.remove(&r.id).unwrap_or_default(),
-            id: r.id,
-            room_id: r.room_id,
-            author_id: r.author_id,
-            author_name: r.author_name,
-            body: r.body,
-            client_msg_id: r.client_msg_id,
-            created_at: r.created_at,
+        .map(|r| {
+            let reply_to = r.reply_preview();
+            ChatMessage {
+                attachments: by_msg.remove(&r.id).unwrap_or_default(),
+                id: r.id,
+                room_id: r.room_id,
+                author_id: r.author_id,
+                author_name: r.author_name,
+                body: r.body,
+                reply_to,
+                client_msg_id: r.client_msg_id,
+                created_at: r.created_at,
+            }
         })
         .collect())
+}
+
+#[derive(sqlx::FromRow)]
+struct ReplyRow {
+    id: String,
+    author_name: String,
+    body: String,
+    has_att: i64,
+}
+
+/// Build a reply preview for a quoted message, but only if it exists in the same
+/// room (so a reply can't quote across rooms). Used on the live send path; the
+/// history path derives the same shape via a self-join.
+pub async fn reply_preview(
+    reads: &SqlitePool,
+    id: &str,
+    room_id: &str,
+) -> sqlx::Result<Option<ReplyPreview>> {
+    let row = sqlx::query_as::<_, ReplyRow>(
+        "SELECT m.id, m.author_name, m.body,
+                EXISTS(SELECT 1 FROM attachments a WHERE a.message_id = m.id) AS has_att
+         FROM messages m WHERE m.id = ?1 AND m.room_id = ?2",
+    )
+    .bind(id)
+    .bind(room_id)
+    .fetch_optional(reads)
+    .await?;
+    Ok(row.map(|r| ReplyPreview {
+        id: r.id,
+        author_name: r.author_name,
+        body: r.body,
+        has_attachment: r.has_att != 0,
+    }))
 }
 
 /// Persist attachment metadata (bytes are written to `Storage` separately).
