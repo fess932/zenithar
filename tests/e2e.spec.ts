@@ -31,6 +31,25 @@ test("browser: link login renders the chat and sends a message", async ({ page }
   await expect(page.getByText(msg)).toBeVisible();
 });
 
+test("browser: a sent message survives a reload (persisted history)", async ({ page }) => {
+  await page.goto(ADMIN_LINK);
+  await expect(page.locator('.beacon[data-state="live"]')).toBeVisible({ timeout: 10000 });
+
+  const msg = `persist-${Date.now()}`;
+  const input = page.getByPlaceholder(composer);
+  await input.fill(msg);
+  await input.press("Enter");
+  await expect(page.getByText(msg)).toBeVisible();
+
+  // Let the batched writer commit (≤50ms) before reloading, otherwise the
+  // reload could race the persistence and read history that's still mid-flush.
+  await page.waitForTimeout(300);
+
+  // Reload: the message must come back from server-side history, not live WS.
+  await page.reload();
+  await expect(page.getByText(msg)).toBeVisible({ timeout: 10000 });
+});
+
 test("browser: admin self-rename sticks", async ({ page }) => {
   await page.goto(ADMIN_LINK);
   await page.getByRole("button", { name: "admin" }).click();
@@ -56,6 +75,15 @@ test("browser: admin issues a client link and the client can open it", async ({
   const clientPage = await ctx.newPage();
   await clientPage.goto(link!);
   await expect(clientPage.getByPlaceholder(composer)).toBeVisible();
+
+  // The client must reach a live socket and be able to send.
+  await expect(clientPage.locator('.beacon[data-state="live"]')).toBeVisible({ timeout: 10000 });
+  const cinput = clientPage.getByPlaceholder(composer);
+  const cmsg = `client-${Date.now()}`;
+  await cinput.fill(cmsg);
+  await cinput.press("Enter");
+  await expect(clientPage.getByText(cmsg)).toBeVisible({ timeout: 10000 });
+
   await ctx.close();
 });
 
@@ -99,6 +127,58 @@ test("browser: employee opens a client room; the message routes only there", asy
   await expect(page.getByText(msg)).toHaveCount(0);
 
   await ctx.close();
+});
+
+test("browser: upload multiple images and they render in the transcript", async ({ page }) => {
+  await page.goto(ADMIN_LINK);
+  await expect(page.locator('.beacon[data-state="live"]')).toBeVisible({ timeout: 10000 });
+
+  // A tiny but valid 1x1 PNG the server can decode + thumbnail.
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  await page.locator('input[type="file"]').setInputFiles([
+    { name: "a.png", mimeType: "image/png", buffer: png },
+    { name: "b.png", mimeType: "image/png", buffer: png },
+  ]);
+
+  // Both uploads finished → send becomes available; post them in one message.
+  const sendBtn = page.getByRole("button", { name: /Отправить|Send/ });
+  await expect(sendBtn).toBeVisible({ timeout: 10000 });
+  await sendBtn.click();
+
+  // Two images appear in the transcript, served from the attachments endpoint.
+  const imgs = page.locator("main img");
+  await expect(imgs).toHaveCount(2, { timeout: 10000 });
+  await expect(imgs.first()).toHaveAttribute("src", /\/api\/attachments\//);
+});
+
+test("api: create an anonymous client (link + room)", async ({ playwright, baseURL }) => {
+  const admin = await playwright.request.newContext({ baseURL });
+  await admin.get(ADMIN_LINK);
+
+  const res = await admin.post("/api/principals", { data: { kind: "client" } });
+  expect(res.ok()).toBeTruthy();
+  const created = await res.json();
+  expect(created.principal_id).toBeTruthy();
+  expect(created.url).toMatch(/^\/i\//);
+
+  // The anonymous client signs in via the link…
+  const client = await playwright.request.newContext({ baseURL });
+  await client.get(created.url);
+  const me = await (await client.get("/api/me")).json();
+  expect(me.kind).toBe("client");
+  expect(me.is_admin).toBe(false);
+
+  // …and is given exactly one room (its own), auto-created on principal creation.
+  const rooms = await (await client.get("/api/rooms")).json();
+  expect(Array.isArray(rooms)).toBeTruthy();
+  expect(rooms.length).toBe(1);
+  expect(rooms[0].kind).toBe("client");
+
+  await admin.dispose();
+  await client.dispose();
 });
 
 test("api: auth gate, admin vs client, revoke, logout", async ({ playwright, baseURL }) => {

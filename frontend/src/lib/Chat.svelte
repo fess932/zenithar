@@ -4,7 +4,17 @@
   import Composer from "./Composer.svelte";
   import Message from "./Message.svelte";
   import Principals from "./Principals.svelte";
-  import { messages, connect, rooms, activeRoom, joinRoom, loadRooms, type RoomSummary } from "./chat";
+  import {
+    messages,
+    connect,
+    rooms,
+    activeRoom,
+    joinRoom,
+    loadRooms,
+    notice,
+    dismissNotice,
+    type RoomSummary,
+  } from "./chat";
   import { me } from "./session";
   import { t } from "./i18n";
 
@@ -83,6 +93,24 @@
 
     <Composer />
   </div>
+
+  <!-- Error toast -->
+  {#if $notice}
+    <div
+      role="alert"
+      class="fixed bottom-20 left-1/2 z-50 flex max-w-[90vw] -translate-x-1/2 items-center gap-3 rounded-md border border-bad bg-surface-2 px-4 py-2 text-[0.85rem] text-bad shadow-lg"
+    >
+      <span>{$notice}</span>
+      <button
+        type="button"
+        onclick={dismissNotice}
+        aria-label={$t("dismiss")}
+        class="grid size-6 shrink-0 cursor-pointer place-items-center rounded text-muted hover:text-text"
+      >
+        ✕
+      </button>
+    </div>
+  {/if}
 
   <!-- Rooms drawer (employees) -->
   {#if drawerOpen}

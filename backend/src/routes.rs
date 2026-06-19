@@ -16,7 +16,7 @@ use crate::{db, now_millis};
 
 /// Reject cross-origin mutations. If there's no Origin (non-browser client) we
 /// allow it; SameSite=Lax already covers the common browser CSRF case.
-fn origin_ok(headers: &HeaderMap) -> bool {
+pub(crate) fn origin_ok(headers: &HeaderMap) -> bool {
     let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok()) else {
         return true;
     };

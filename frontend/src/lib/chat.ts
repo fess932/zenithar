@@ -2,6 +2,17 @@
 // the rooms the caller can open, and the active room. Author comes from the
 // authenticated identity (server-side); sends only carry body + a client id.
 import { get, writable } from "svelte/store";
+import { t } from "./i18n";
+
+export interface Attachment {
+  id: string;
+  filename: string;
+  content_type: string;
+  size: number;
+  width: number | null;
+  height: number | null;
+  has_thumb: boolean;
+}
 
 export interface ChatMessage {
   id: string;
@@ -11,6 +22,7 @@ export interface ChatMessage {
   body: string;
   client_msg_id: string | null;
   created_at: number; // unix millis
+  attachments: Attachment[];
 }
 
 export interface RoomSummary {
@@ -31,6 +43,27 @@ export const messages = writable<ChatMessage[]>([]);
 export const status = writable<Status>("connecting");
 export const rooms = writable<RoomSummary[]>([]);
 export const activeRoom = writable<string | null>(null);
+
+/// Transient, user-visible error banner (also logged to the console).
+export const notice = writable<string | null>(null);
+let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flash(msg: string): void {
+  console.error("[zenithar]", msg);
+  notice.set(msg);
+  if (noticeTimer) clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => notice.set(null), 6000);
+}
+
+export function dismissNotice(): void {
+  notice.set(null);
+  if (noticeTimer) clearTimeout(noticeTimer);
+}
+
+/// Surface a transient error toast from a component.
+export function notify(msg: string): void {
+  flash(msg);
+}
 
 let ws: WebSocket | null = null;
 let backoff = 500;
@@ -80,10 +113,43 @@ export function joinRoom(room_id: string): void {
   }
 }
 
-export function send(body: string): boolean {
-  if (ws?.readyState !== WebSocket.OPEN) return false;
-  ws.send(JSON.stringify({ type: "msg", body, client_msg_id: crypto.randomUUID() }));
+export function send(body: string, attachmentIds: string[] = []): boolean {
+  if (ws?.readyState !== WebSocket.OPEN) {
+    flash(get(t)("errSend"));
+    return false;
+  }
+  ws.send(
+    JSON.stringify({
+      type: "msg",
+      body,
+      client_msg_id: crypto.randomUUID(),
+      attachment_ids: attachmentIds,
+    }),
+  );
   return true;
+}
+
+/// Upload a file/image/voice clip to the active room; returns its metadata.
+export async function uploadFile(file: File): Promise<Attachment | null> {
+  const room = get(activeRoom);
+  if (!room) {
+    flash(get(t)("errUpload"));
+    return null;
+  }
+  const fd = new FormData();
+  fd.append("room_id", room);
+  fd.append("file", file, file.name);
+  try {
+    const r = await fetch("/api/upload", { method: "POST", body: fd });
+    if (!r.ok) {
+      flash(`${get(t)("errUpload")} (${r.status})`);
+      return null;
+    }
+    return (await r.json()) as Attachment;
+  } catch {
+    flash(get(t)("errUpload"));
+    return null;
+  }
 }
 
 export async function loadRooms(): Promise<void> {

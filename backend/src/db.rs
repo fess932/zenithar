@@ -6,7 +6,7 @@ use sqlx::SqlitePool;
 
 use ulid::Ulid;
 
-use crate::models::{ChatMessage, RoomSummary};
+use crate::models::{Attachment, ChatMessage, RoomSummary};
 
 const MIGRATION: &str = include_str!("../migrations/0001_init.sql");
 
@@ -33,13 +33,21 @@ pub async fn open_writer(path: &str) -> Result<SqlitePool> {
     Ok(pool)
 }
 
-/// A read-only pool. WAL lets these run concurrently with the write batch, so
-/// reads never wait on persistence.
+/// The read pool. WAL lets these run concurrently with the write batch, so reads
+/// never wait on persistence.
+///
+/// NOTE: do **not** open these `read_only`. A SQLite read-only connection cannot
+/// read uncheckpointed `-wal` content (it needs write access to the `-shm`
+/// wal-index), so it would only ever see the last-checkpointed snapshot — making
+/// freshly written messages invisible until a checkpoint. We open normal
+/// (read-capable) WAL connections and simply never issue writes through them.
 pub async fn open_readers(path: &str, size: u32) -> Result<SqlitePool> {
     let opts = SqliteConnectOptions::new()
         .filename(path)
-        .read_only(true)
-        .busy_timeout(Duration::from_secs(5));
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
+        .busy_timeout(Duration::from_secs(5))
+        .foreign_keys(true);
 
     let pool = SqlitePoolOptions::new()
         .max_connections(size.max(1))
@@ -48,24 +56,166 @@ pub async fn open_readers(path: &str, size: u32) -> Result<SqlitePool> {
     Ok(pool)
 }
 
-/// Most recent messages in a room, returned oldest-first.
+#[derive(sqlx::FromRow)]
+struct MsgRow {
+    id: String,
+    room_id: String,
+    author_id: String,
+    author_name: String,
+    body: String,
+    client_msg_id: Option<String>,
+    created_at: i64,
+}
+
+/// Attachment row carrying its owning message id (for grouping into messages).
+#[derive(sqlx::FromRow)]
+struct MsgAttRow {
+    message_id: String,
+    id: String,
+    filename: String,
+    content_type: String,
+    size: i64,
+    width: Option<i64>,
+    height: Option<i64>,
+    has_thumb: bool,
+}
+
+/// Most recent messages in a room (oldest-first), each with its attachments (0–5).
 pub async fn recent_messages(
     pool: &SqlitePool,
     room_id: &str,
     limit: i64,
 ) -> Result<Vec<ChatMessage>> {
-    let mut rows = sqlx::query_as::<_, ChatMessage>(
+    let rows = sqlx::query_as::<_, MsgRow>(
         "SELECT id, room_id, author_id, author_name, body, client_msg_id, created_at
-         FROM messages WHERE room_id = ?1
-         ORDER BY id DESC LIMIT ?2",
+         FROM messages WHERE room_id = ?1 ORDER BY id DESC LIMIT ?2",
     )
     .bind(room_id)
     .bind(limit)
     .fetch_all(pool)
     .await?;
 
-    rows.reverse(); // query was DESC for the LIMIT; hand back oldest-first
-    Ok(rows)
+    // Attachments for exactly the messages we just loaded (same window subquery).
+    let atts = sqlx::query_as::<_, MsgAttRow>(
+        "SELECT message_id, id, filename, content_type, size, width, height, has_thumb
+         FROM attachments
+         WHERE message_id IN (
+             SELECT id FROM messages WHERE room_id = ?1 ORDER BY id DESC LIMIT ?2
+         )
+         ORDER BY id ASC",
+    )
+    .bind(room_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    let mut by_msg: std::collections::HashMap<String, Vec<Attachment>> =
+        std::collections::HashMap::new();
+    for a in atts {
+        by_msg.entry(a.message_id).or_default().push(Attachment {
+            id: a.id,
+            filename: a.filename,
+            content_type: a.content_type,
+            size: a.size,
+            width: a.width,
+            height: a.height,
+            has_thumb: a.has_thumb,
+        });
+    }
+
+    // query was DESC for the LIMIT; hand back oldest-first
+    Ok(rows
+        .into_iter()
+        .rev()
+        .map(|r| ChatMessage {
+            attachments: by_msg.remove(&r.id).unwrap_or_default(),
+            id: r.id,
+            room_id: r.room_id,
+            author_id: r.author_id,
+            author_name: r.author_name,
+            body: r.body,
+            client_msg_id: r.client_msg_id,
+            created_at: r.created_at,
+        })
+        .collect())
+}
+
+/// Persist attachment metadata (bytes are written to `Storage` separately).
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_attachment(
+    write: &SqlitePool,
+    a: &Attachment,
+    room_id: &str,
+    uploader_id: &str,
+    created_at: i64,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO attachments
+           (id, room_id, uploader_id, filename, content_type, size, width, height, has_thumb, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+    )
+    .bind(&a.id)
+    .bind(room_id)
+    .bind(uploader_id)
+    .bind(&a.filename)
+    .bind(&a.content_type)
+    .bind(a.size)
+    .bind(a.width)
+    .bind(a.height)
+    .bind(a.has_thumb)
+    .bind(created_at)
+    .execute(write)
+    .await?;
+    Ok(())
+}
+
+#[derive(sqlx::FromRow)]
+struct AttRow {
+    room_id: String,
+    id: String,
+    filename: String,
+    content_type: String,
+    size: i64,
+    width: Option<i64>,
+    height: Option<i64>,
+    has_thumb: bool,
+}
+
+/// Look up an attachment plus the room it belongs to (for access checks).
+pub async fn lookup_attachment(
+    reads: &SqlitePool,
+    id: &str,
+) -> sqlx::Result<Option<(String, Attachment)>> {
+    let row = sqlx::query_as::<_, AttRow>(
+        "SELECT room_id, id, filename, content_type, size, width, height, has_thumb
+         FROM attachments WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(reads)
+    .await?;
+    Ok(row.map(|r| {
+        (
+            r.room_id,
+            Attachment {
+                id: r.id,
+                filename: r.filename,
+                content_type: r.content_type,
+                size: r.size,
+                width: r.width,
+                height: r.height,
+                has_thumb: r.has_thumb,
+            },
+        )
+    }))
+}
+
+/// A client's room id, if it exists (read-only; no creation).
+pub async fn room_of_client(reads: &SqlitePool, client_id: &str) -> sqlx::Result<Option<String>> {
+    let row = sqlx::query_as::<_, (String,)>("SELECT id FROM rooms WHERE client_id = ?1")
+        .bind(client_id)
+        .fetch_optional(reads)
+        .await?;
+    Ok(row.map(|(id,)| id))
 }
 
 /// The dedicated room for a client, creating it on first need. Idempotent —

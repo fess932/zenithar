@@ -14,6 +14,7 @@ use crate::writer::WriteCmd;
 
 const COMMON_ROOM: &str = "common";
 const HISTORY_ON_CONNECT: i64 = 50;
+const MAX_ATTACHMENTS: usize = 5;
 
 /// `/ws` — requires an authenticated identity (employee or client). The author
 /// of every message is taken from that identity, never from the client frame.
@@ -88,7 +89,24 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                             break;
                         }
                     }
-                    Inbound::Msg { body, client_msg_id } => {
+                    Inbound::Msg { body, client_msg_id, attachment_ids } => {
+                        // Resolve up to 5 attachments, each must belong to this room.
+                        let mut attachments = Vec::new();
+                        let mut bad = false;
+                        for aid in attachment_ids.into_iter().take(MAX_ATTACHMENTS) {
+                            match db::lookup_attachment(&state.reads, &aid).await {
+                                Ok(Some((room, att))) if room == active_room => attachments.push(att),
+                                _ => { bad = true; break }
+                            }
+                        }
+                        if bad {
+                            debug!("dropping msg with bad attachment");
+                            continue;
+                        }
+                        // Ignore empty messages that carry nothing.
+                        if body.trim().is_empty() && attachments.is_empty() {
+                            continue;
+                        }
                         let chat = ChatMessage {
                             id: Ulid::new().to_string(),
                             room_id: active_room.clone(),
@@ -97,6 +115,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                             body,
                             client_msg_id,
                             created_at: crate::now_millis(),
+                            attachments,
                         };
                         // Realtime first: fan out to everyone subscribed.
                         let _ = state.broadcast.send(chat.clone());
@@ -112,7 +131,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
             bcast = rx.recv() => {
                 match bcast {
                     Ok(chat) if chat.room_id == active_room => {
-                        let frame = Outbound::Message { message: chat };
+                        let frame = Outbound::Message { message: Box::new(chat) };
                         if let Ok(json) = serde_json::to_string(&frame) {
                             if sender.send(Message::Text(json.into())).await.is_err() {
                                 break;

@@ -71,7 +71,7 @@ async fn write_batch(pool: &SqlitePool, batch: &[WriteCmd]) -> sqlx::Result<()> 
     let mut tx = pool.begin().await?;
     for cmd in batch {
         let m = &cmd.msg;
-        sqlx::query(
+        let inserted = sqlx::query(
             "INSERT INTO messages
                (id, room_id, author_id, author_name, body, client_msg_id, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
@@ -85,7 +85,21 @@ async fn write_batch(pool: &SqlitePool, batch: &[WriteCmd]) -> sqlx::Result<()> 
         .bind(m.client_msg_id.as_deref())
         .bind(m.created_at)
         .execute(&mut *tx)
-        .await?;
+        .await?
+        .rows_affected();
+
+        // Link this message's attachments to it (skip on idempotent no-op insert).
+        if inserted > 0 {
+            for att in &m.attachments {
+                sqlx::query(
+                    "UPDATE attachments SET message_id = ?1 WHERE id = ?2 AND message_id IS NULL",
+                )
+                .bind(&m.id)
+                .bind(&att.id)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
     }
     tx.commit().await
 }

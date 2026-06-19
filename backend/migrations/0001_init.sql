@@ -50,8 +50,27 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at    INTEGER NOT NULL
 );
 
+-- Uploaded files (images get a thumbnail + dimensions). The id doubles as the
+-- storage key; bytes live on disk (or S3 later) via the Storage trait, not here.
+-- A message can carry several attachments (up to 5); `message_id` is NULL between
+-- upload and the message being sent.
+CREATE TABLE IF NOT EXISTS attachments (
+    id           TEXT PRIMARY KEY,          -- ULID; also the disk key
+    room_id      TEXT NOT NULL REFERENCES rooms(id),
+    uploader_id  TEXT NOT NULL REFERENCES principals(id),
+    message_id   TEXT REFERENCES messages(id), -- set when the message is sent
+    filename     TEXT NOT NULL,             -- original name (display only)
+    content_type TEXT NOT NULL,             -- sniffed/validated mime
+    size         INTEGER NOT NULL,          -- bytes
+    width        INTEGER,                   -- images only
+    height       INTEGER,
+    has_thumb    INTEGER NOT NULL DEFAULT 0,
+    created_at   INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_room_id ON messages(room_id, id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_msg_id ON messages(client_msg_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
 
 -- Seed the common team room.
 INSERT INTO rooms (id, kind, created_at)

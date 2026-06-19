@@ -6,7 +6,7 @@ description = "Zenithar — self-hosted corporate messenger backend (Phase 0 ske
 license = "MIT"
 
 [dependencies]
-axum = { version = "0.8.9", features = ["ws"] }
+axum = { version = "0.8.9", features = ["ws", "multipart"] }
 axum-extra = { version = "0.10", features = ["cookie"] }
 tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.6", features = ["trace", "cors"] }
@@ -23,6 +23,7 @@ getrandom = "0.2"
 sha2 = "0.10"
 base64 = "0.22"
 time = "0.3"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 
 [profile.dev]
 # bundled SQLite C compile is the slow part; keep our code fast to iterate

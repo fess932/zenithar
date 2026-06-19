@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 
 use crate::models::ChatMessage;
+use crate::storage::Storage;
 use crate::writer::WriteTx;
 
 /// Shared application state. `reads` is the read-only pool; `db` is the
@@ -13,6 +16,8 @@ pub struct AppState {
     pub broadcast: broadcast::Sender<ChatMessage>,
     pub reads: SqlitePool,
     pub db: SqlitePool,
+    /// Blob backend for attachments (disk now; S3-swappable later).
+    pub storage: Arc<dyn Storage>,
     /// Set Secure on auth cookies (enable behind TLS).
     pub secure_cookies: bool,
 }

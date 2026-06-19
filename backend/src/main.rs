@@ -1,6 +1,8 @@
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
+use axum::extract::DefaultBodyLimit;
 use axum::http::{header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
@@ -16,6 +18,8 @@ mod models;
 mod names;
 mod routes;
 mod state;
+mod storage;
+mod uploads;
 mod writer;
 mod ws;
 
@@ -111,11 +115,18 @@ async fn main() -> Result<()> {
         .unwrap_or(false);
 
     // Ensure the (git-ignored) data dir exists before SQLite opens the file.
-    if let Some(parent) = std::path::Path::new(&db_path).parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)?;
-        }
-    }
+    let data_dir = std::path::Path::new(&db_path)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    std::fs::create_dir_all(&data_dir)?;
+
+    // Attachment blobs live next to the DB (git-ignored), behind the Storage trait.
+    let attach_dir = std::env::var("ZENITHAR_ATTACHMENTS")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| data_dir.join("attachments"));
+    let storage: Arc<dyn storage::Storage> = Arc::new(storage::DiskStorage::new(attach_dir)?);
 
     // Writer uses a single-connection pool; readers get their own pool.
     let write_pool = db::open_writer(&db_path).await?;
@@ -133,6 +144,7 @@ async fn main() -> Result<()> {
         broadcast: broadcast_tx,
         reads,
         db: write_pool,
+        storage,
         secure_cookies,
     };
 
@@ -143,6 +155,12 @@ async fn main() -> Result<()> {
         .route("/api/me", get(routes::me))
         .route("/api/me/name", post(routes::rename))
         .route("/api/rooms", get(routes::rooms))
+        .route(
+            "/api/upload",
+            post(uploads::upload).layer(DefaultBodyLimit::max(uploads::MAX_UPLOAD_BYTES + 1024)),
+        )
+        .route("/api/attachments/{id}", get(uploads::serve))
+        .route("/api/attachments/{id}/thumb", get(uploads::serve_thumb))
         .route("/api/auth/logout", post(routes::logout))
         .route(
             "/api/principals",
