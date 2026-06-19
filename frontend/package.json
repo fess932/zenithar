@@ -1,0 +1,16 @@
+{
+  "name": "zenithar-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build src/main.ts --outdir dist --minify && bun run copy",
+    "copy": "cp src/index.html dist/index.html",
+    "dev": "bun run build && bun build src/main.ts --outdir dist --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
