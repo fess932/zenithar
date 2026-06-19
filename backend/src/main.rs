@@ -199,6 +199,12 @@ async fn main() -> Result<()> {
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .collect();
+    // Fixed UDP port range for call media (e.g. "50000-50100"), so a NAT/DMZ can
+    // forward exactly that range and it's testable. Empty/invalid = ephemeral.
+    let udp_ports: Option<(u16, u16)> = std::env::var("ZENITHAR_UDP_PORTS")
+        .ok()
+        .and_then(|v| v.split_once('-').map(|(a, b)| (a.trim().to_string(), b.trim().to_string())))
+        .and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)));
     // Call recordings (Phase 5): one Ogg/Opus file per participant, on disk.
     let recordings_dir = std::env::var("ZENITHAR_RECORDINGS")
         .map(std::path::PathBuf::from)
@@ -208,6 +214,7 @@ async fn main() -> Result<()> {
     let calls = Arc::new(calls::CallRegistry::new(
         stun,
         public_ips,
+        udp_ports,
         signal_tx.clone(),
         write_pool.clone(),
         recordings_dir,

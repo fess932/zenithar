@@ -69,6 +69,33 @@ Fix: advertise the public IP (NAT 1:1). No STUN/TURN needed.
 > router's public IP from inside needs NAT hairpin, which most routers don't do —
 > so a same-LAN test call will `ICE failed` even when the setup is correct.
 
+### Pin the media UDP port range (`ZENITHAR_UDP_PORTS`)
+
+By default each call binds a **random** high UDP port, so you can only make calls
+work by forwarding the *entire* UDP range (true DMZ). To forward a small, known
+range instead — and to be able to test reachability directly — pin it:
+
+```yaml
+    environment:
+      ZENITHAR_PUBLIC_IP: "203.0.113.7"
+      ZENITHAR_UDP_PORTS: "51000-51200"   # ~1-2 ports per call leg; avoid ports in use (e.g. WireGuard)
+```
+
+Then forward **UDP 51000–51200** to the server in the router, and verify it's
+actually reachable from outside (this is the usual culprit when calls still fail
+with the public candidate present but `sendto … / timed out` on the client).
+Watch packets arrive on the server (passive — no listener binding to get wrong):
+
+```sh
+# on the server host (not the distroless container):
+sudo tcpdump -ni any udp port 51000
+# from an external machine (mobile/other network), send a packet:
+echo test | nc -u -w1 <public-ip> 51000
+```
+
+If that text doesn't arrive, the DMZ/firewall isn't forwarding UDP — fix that
+first; no WebRTC setting can work around an unreachable port.
+
 ```yaml
     environment:
       ZENITHAR_PUBLIC_IP: "203.0.113.7"   # your external IP (comma-separate for several)
@@ -125,6 +152,7 @@ Or, more surgically, stop advertising that global-scope ULA on the bridge.
 | `ZENITHAR_RECORDINGS` | `<data>/recordings` | Server-side call recordings (`<call_id>.<participant_id>.ogg`). |
 | `ZENITHAR_STUN` | — | Comma-separated STUN URLs for ICE. Empty = host candidates (LAN/localhost). |
 | `ZENITHAR_PUBLIC_IP` | — | Public IP(s) to advertise as host candidates (NAT 1:1). Set on a server behind NAT/DMZ so remote browsers can reach the media path. |
+| `ZENITHAR_UDP_PORTS` | — | Fixed media UDP port range, e.g. `51000-51200`. Forward exactly this range in the router. Empty = random ephemeral ports. |
 | `ZENITHAR_SECURE_COOKIES` | `0` | `1`/`true` to mark the auth cookie `Secure` (behind TLS). |
 | `RUST_LOG` | `info` | Log filter (`tracing` env-filter syntax). |
 

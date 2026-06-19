@@ -25,6 +25,7 @@ use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS};
 use webrtc::api::setting_engine::SettingEngine;
 use webrtc::api::{APIBuilder, API};
+use webrtc::ice::udp_network::{EphemeralUDP, UDPNetwork};
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 use webrtc::ice_transport::ice_candidate_type::RTCIceCandidateType;
 use webrtc::ice_transport::ice_server::RTCIceServer;
@@ -111,6 +112,7 @@ impl CallRegistry {
     pub fn new(
         stun: Vec<String>,
         public_ips: Vec<String>,
+        udp_ports: Option<(u16, u16)>,
         signal: broadcast::Sender<Signal>,
         db: sqlx::SqlitePool,
         recordings_dir: PathBuf,
@@ -133,6 +135,16 @@ impl CallRegistry {
         let mut setting = SettingEngine::default();
         if !public_ips.is_empty() {
             setting.set_nat_1to1_ips(public_ips, RTCIceCandidateType::Host);
+        }
+        // Pin the media UDP ports to a fixed range so a self-host behind NAT can
+        // forward exactly that range (instead of the whole ephemeral space) and
+        // test reachability directly. Without this, each call binds a random high
+        // port. Needs enough ports for concurrent legs (a few per call).
+        if let Some((lo, hi)) = udp_ports {
+            match EphemeralUDP::new(lo, hi) {
+                Ok(eph) => setting.set_udp_network(UDPNetwork::Ephemeral(eph)),
+                Err(e) => warn!(error = %e, lo, hi, "invalid ZENITHAR_UDP_PORTS range; ignoring"),
+            }
         }
 
         let api = APIBuilder::new()

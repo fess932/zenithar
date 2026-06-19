@@ -2,8 +2,22 @@ services:
   zenithar:
     build: .
     image: ghcr.io/fess932/zenithar:latest
-    ports:
-      - "3000:3000" # HTTP + WebSocket (chat & call signaling)
+    # --- Networking for voice calls --------------------------------------------
+    # Call MEDIA is UDP. In bridged mode the container gathers its podman-bridge
+    # IP (192.168.x), not the host's, so forwarded UDP never reaches the app.
+    # Pick ONE:
+    #
+    # (A) Host networking — simplest & most reliable for WebRTC (no UDP source-
+    #     port mangling). Comment out `ports:` below and use:
+    #   network_mode: host
+    #
+    # (B) Keep bridged but publish the PINNED UDP range (needs ZENITHAR_UDP_PORTS
+    #     set to the same range). Replace `ports:` with:
+    #   ports:
+    #     - "3000:3000"
+    #     - "51000-51200:51000-51200/udp"
+    # ports:
+    #   - "3000:3000" # HTTP + WebSocket (chat & call signaling)
     volumes:
       # Local ./data holds the SQLite DB, attachments, call recordings, and the
       # bootstrap admin link. The container runs as root, so it can write here
@@ -23,9 +37,12 @@ services:
       # STUN for WebRTC ICE (comma-separated). Empty works on a LAN/localhost.
       ZENITHAR_STUN: ""
       ZENITHAR_PUBLIC_IP: "<external ip>"
+      # Fixed media UDP range — forward exactly this in the router (avoid ports
+      # already in use, e.g. WireGuard on 50000/50001). Must match option (B)'s
+      # published range if bridged.
+      ZENITHAR_UDP_PORTS: "51000-51200"
     restart: unless-stopped
-    # NOTE: real WebRTC *media* is UDP on ephemeral ports — bridged Docker
-    # networking won't forward those. On Linux use host networking for live
-    # calls (signaling over :3000 works either way; pinning a UDP range is a
-    # follow-up). Uncomment and remove `ports:` above:
-    # network_mode: host
+    # See the "Networking for voice calls" note at the top: pick host networking
+    # (A) or publish the pinned UDP range (B). Bridged without one of these = no
+    # call audio (the container only sees its 192.168.x bridge IP).
+    network_mode: host
