@@ -5,6 +5,8 @@ use tokio::sync::broadcast;
 
 use crate::calls::CallRegistry;
 use crate::models::{ChatMessage, ClientNotice, Signal};
+use crate::presence::PresenceRegistry;
+use crate::ratelimit::Limits;
 use crate::storage::Storage;
 use crate::writer::WriteTx;
 
@@ -26,6 +28,10 @@ pub struct AppState {
     /// Heads-up fan-out for new anonymous-client messages (delivered to all
     /// employee sockets, cross-room).
     pub notify: broadcast::Sender<ClientNotice>,
+    /// Who's online right now (Phase 7 presence).
+    pub presence: Arc<PresenceRegistry>,
+    /// Abuse control: login + upload rate limiters (Phase 7).
+    pub limits: Arc<Limits>,
     /// Set Secure on auth cookies (enable behind TLS).
     pub secure_cookies: bool,
 }

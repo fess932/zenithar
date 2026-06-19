@@ -8,6 +8,8 @@
   export let roomTitle = "";
   export let unreadTotal = 0;
   export let onOpenRooms: () => void = () => {};
+  // null = no dot (common/own room); true/false = client online/offline.
+  export let roomOnline: boolean | null = null;
 
   const statusKey = {
     connecting: "connecting",
@@ -51,6 +53,12 @@
         </span>
       {/if}
       <span class="truncate font-mono text-[0.84rem] text-text">{roomTitle}</span>
+      {#if roomOnline !== null}
+        <span
+          class="size-1.5 shrink-0 rounded-full {roomOnline ? 'bg-emerald-400' : 'bg-muted/50'}"
+          title={roomOnline ? "online" : "offline"}
+        ></span>
+      {/if}
     </button>
   {:else}
     <span

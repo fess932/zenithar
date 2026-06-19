@@ -20,6 +20,7 @@
     notice,
     dismissNotice,
     unread,
+    online,
     type RoomSummary,
   } from "./chat";
   import {
@@ -74,6 +75,12 @@
   $: current = $rooms.find((r) => r.id === $activeRoom) ?? null;
   $: currentTitle = current ? roomLabel(current) : $t("room");
 
+  // Presence helpers.
+  $: onlineEmployees = Object.values($online).filter((k) => k === "user").length;
+  const isClientOnline = (r: RoomSummary): boolean => !!(r.client_id && $online[r.client_id]);
+  // Online dot for the header: only meaningful in a client room.
+  $: currentRoomOnline = current && current.kind === "client" ? isClientOnline(current) : null;
+
   function openDrawer(): void {
     drawerOpen = true;
     loadRooms(); // refresh in case new client rooms appeared
@@ -87,13 +94,16 @@
 {#if view === "admin"}
   <Principals onBack={() => (view = "chat")} />
 {:else}
-  <div class="grid h-dvh grid-rows-[auto_1fr_auto] bg-ink font-sans text-[15px] text-text">
+  <div
+    class="grid h-dvh w-full max-w-full grid-rows-[auto_1fr_auto] overflow-x-hidden bg-ink font-sans text-[15px] text-text"
+  >
     <Header
       onOpenAdmin={() => (view = "admin")}
       {isEmployee}
       roomTitle={currentTitle}
       unreadTotal={totalUnread}
       onOpenRooms={openDrawer}
+      roomOnline={currentRoomOnline}
     />
 
     <main
@@ -218,6 +228,7 @@
         {#each $rooms as r (r.id)}
           {@const count = $unread[r.id] ?? 0}
           {@const muted = $mutedRooms.has(r.id)}
+          {@const live = r.kind === "common" ? onlineEmployees > 0 : isClientOnline(r)}
           <div class="flex items-center gap-1">
             <button
               type="button"
@@ -226,11 +237,13 @@
               class="flex flex-1 items-center gap-2 rounded-md px-3 py-2 text-left text-[0.9rem] hover:bg-surface-2 aria-[current=true]:bg-surface-2 aria-[current=true]:text-beacon"
             >
               <span
-                class="size-1.5 shrink-0 rounded-full"
-                class:bg-beacon={r.kind === "common"}
-                class:bg-you={r.kind === "client"}
+                class="size-2 shrink-0 rounded-full {live ? 'bg-emerald-400' : 'bg-muted/40'}"
+                title={live ? "online" : "offline"}
               ></span>
               <span class="flex-1 truncate">{roomLabel(r)}</span>
+              {#if r.kind === "common" && onlineEmployees > 0}
+                <span class="shrink-0 font-mono text-[0.72rem] text-muted">{onlineEmployees}</span>
+              {/if}
               {#if count > 0}
                 <span
                   class="grid min-w-5 shrink-0 place-items-center rounded-full bg-beacon px-1.5 text-[0.7rem] font-medium text-[#1a1206]"

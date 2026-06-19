@@ -3,6 +3,16 @@
 /* Tell Tailwind where utility classes live (CLI runs from frontend/). */
 @source "./**/*.{html,svelte}";
 
+/* Never let the page scroll sideways: any stray too-wide element is clipped
+   rather than creating a horizontal scroll / grey gutter on mobile. The chat
+   transcript does its own vertical scrolling inside <main>. */
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
+
 /* Design tokens → Tailwind utilities (bg-ink, text-muted, font-mono, …).
    Self-hosted tool: no external fonts, identity comes from these. */
 @theme {

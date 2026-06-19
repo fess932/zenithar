@@ -48,7 +48,17 @@ pub struct RoomSummary {
     pub id: String,
     pub kind: String,
     pub title: Option<String>,
+    /// The client principal that owns a client room (None for the common room);
+    /// lets the UI show that client's online dot.
+    pub client_id: Option<String>,
     pub created_at: i64,
+}
+
+/// One online principal, for the presence snapshot sent on connect.
+#[derive(Clone, Debug, Serialize)]
+pub struct PresenceEntry {
+    pub id: String,
+    pub kind: String,
 }
 
 /// A cross-room heads-up for employees: an anonymous client just wrote in their
@@ -129,6 +139,14 @@ pub enum Outbound {
     CallEnded { call_id: String },
     /// A new message landed in an anonymous client room (employees only).
     ClientNotice { notice: ClientNotice },
+    /// Full set of currently-online principals (sent once on connect).
+    PresenceSnapshot { online: Vec<PresenceEntry> },
+    /// A principal came online / went offline.
+    Presence {
+        id: String,
+        kind: String,
+        online: bool,
+    },
 }
 
 /// An addressed signaling frame fanned out over the `signal` broadcast channel.

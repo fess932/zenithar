@@ -28,6 +28,7 @@ use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
+use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
@@ -156,7 +157,7 @@ impl CallRegistry {
     /// server PeerConnection, returns the SDP offer to send back to them, and
     /// rings the rest of the room.
     pub async fn join(
-        &self,
+        self: &Arc<Self>,
         room_id: &str,
         principal_id: &str,
         principal_name: &str,
@@ -195,6 +196,31 @@ impl CallRegistry {
 
         // Build this participant's PeerConnection.
         let pc = Arc::new(self.api.new_peer_connection(self.ice_config()).await?);
+
+        // Robustness (Phase 7): if the peer's connection drops (tab closed,
+        // network lost, WS gone) without a clean `call-leave`, tear their leg
+        // down so the call doesn't strand. We ignore `Closed` (that's our own
+        // `leave` calling `pc.close()`), reacting only to network-level loss.
+        {
+            let weak_reg = Arc::downgrade(self);
+            let call_id = call.id.clone();
+            let pid = principal_id.to_string();
+            pc.on_peer_connection_state_change(Box::new(move |s| {
+                let weak_reg = weak_reg.clone();
+                let call_id = call_id.clone();
+                let pid = pid.clone();
+                Box::pin(async move {
+                    if matches!(
+                        s,
+                        RTCPeerConnectionState::Failed | RTCPeerConnectionState::Disconnected
+                    ) {
+                        if let Some(reg) = weak_reg.upgrade() {
+                            reg.leave(&call_id, &pid).await;
+                        }
+                    }
+                })
+            }));
+        }
 
         // The local track this participant will *receive* (others' audio mixed in).
         let send_track = Arc::new(TrackLocalStaticRTP::new(

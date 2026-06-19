@@ -37,7 +37,14 @@ export interface RoomSummary {
   id: string;
   kind: "common" | "client";
   title: string | null; // client name; null for the common room
+  client_id: string | null; // owning client (for its online dot); null for common
   created_at: number;
+}
+
+/// One online principal (presence snapshot entry).
+export interface PresenceEntry {
+  id: string;
+  kind: string;
 }
 
 /// A heads-up that an anonymous client wrote in their room (employees only).
@@ -56,6 +63,8 @@ type Frame =
   | { type: "history"; room_id: string; messages: ChatMessage[] }
   | { type: "message"; message: ChatMessage }
   | { type: "client-notice"; notice: ClientNotice }
+  | { type: "presence-snapshot"; online: PresenceEntry[] }
+  | { type: "presence"; id: string; kind: string; online: boolean }
   | { type: string; [k: string]: unknown };
 
 /// A unique id that works outside secure contexts too. `crypto.randomUUID` is
@@ -93,6 +102,10 @@ export const messages = writable<ChatMessage[]>([]);
 export const status = writable<Status>("connecting");
 export const rooms = writable<RoomSummary[]>([]);
 export const activeRoom = writable<string | null>(null);
+
+/// Currently-online principals: id → kind. Reset whenever the socket reconnects
+/// (a fresh snapshot follows). Lets the UI show online dots / counts.
+export const online = writable<Record<string, string>>({});
 
 /// The message the composer is currently replying to (Telegram-style), or null.
 export const replyingTo = writable<ChatMessage | null>(null);
@@ -156,6 +169,8 @@ export function connect(): void {
     // Restore the room we were viewing (server otherwise picks the default).
     const want = get(activeRoom);
     if (want) ws?.send(JSON.stringify({ type: "join", room_id: want }));
+    // Flush anything composed while offline (idempotent via client_msg_id).
+    flushPending();
   };
   ws.onmessage = (ev) => {
     let f: Frame;
@@ -180,16 +195,54 @@ export function connect(): void {
         unread.update((u) => ({ ...u, [n.room_id]: (u[n.room_id] ?? 0) + 1 }));
         clientNoticeHandler?.(n);
       }
+    } else if (f.type === "presence-snapshot") {
+      const list = (f as { online: PresenceEntry[] }).online;
+      online.set(Object.fromEntries(list.map((p) => [p.id, p.kind])));
+    } else if (f.type === "presence") {
+      const p = f as { id: string; kind: string; online: boolean };
+      online.update((cur) => {
+        const next = { ...cur };
+        if (p.online) next[p.id] = p.kind;
+        else delete next[p.id];
+        return next;
+      });
     } else if (f.type.startsWith("call-")) {
       signalHandler?.(f);
     }
   };
   ws.onclose = () => {
     status.set("down");
+    online.set({}); // stale until the next snapshot
     setTimeout(connect, backoff);
     backoff = Math.min(backoff * 2, 8000);
   };
   ws.onerror = () => ws?.close();
+}
+
+// Messages composed while the socket is down wait here and flush on reconnect.
+// `client_msg_id` makes a resend idempotent, so a flush can't duplicate.
+interface OutMsg {
+  body: string;
+  attachment_ids: string[];
+  reply_to: string | null;
+  client_msg_id: string;
+}
+let pending: OutMsg[] = [];
+const MAX_PENDING = 50;
+
+function transmit(m: OutMsg): boolean {
+  if (ws?.readyState !== WebSocket.OPEN) return false;
+  ws.send(JSON.stringify({ type: "msg", ...m }));
+  return true;
+}
+
+function flushPending(): void {
+  if (pending.length === 0) return;
+  const queue = pending;
+  pending = [];
+  for (const m of queue) {
+    if (!transmit(m)) pending.push(m); // socket closed again mid-flush
+  }
 }
 
 /// Switch the open room (employees only; clients have a single room).
@@ -209,19 +262,20 @@ export function send(
   attachmentIds: string[] = [],
   replyToId: string | null = null,
 ): boolean {
-  if (ws?.readyState !== WebSocket.OPEN) {
-    flash(get(t)("errSend"));
-    return false;
+  const m: OutMsg = {
+    body,
+    attachment_ids: attachmentIds,
+    reply_to: replyToId,
+    client_msg_id: uuid(),
+  };
+  // If the socket is down, queue and let onopen flush it (instead of failing).
+  if (!transmit(m)) {
+    if (pending.length >= MAX_PENDING) {
+      flash(get(t)("errSend"));
+      return false;
+    }
+    pending.push(m);
   }
-  ws.send(
-    JSON.stringify({
-      type: "msg",
-      body,
-      client_msg_id: uuid(),
-      attachment_ids: attachmentIds,
-      reply_to: replyToId,
-    }),
-  );
   return true;
 }
 

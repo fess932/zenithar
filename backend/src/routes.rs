@@ -28,12 +28,38 @@ pub(crate) fn origin_ok(headers: &HeaderMap) -> bool {
 
 // ---- login by link ---------------------------------------------------------
 
+/// Best-effort client IP for rate limiting: trust the reverse proxy's
+/// `X-Forwarded-For` (first hop) / `X-Real-IP` when present, else a constant key
+/// (so a direct, proxy-less deploy still gets a single shared bucket).
+pub(crate) fn client_ip(headers: &HeaderMap) -> String {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            headers
+                .get("x-real-ip")
+                .and_then(|v| v.to_str().ok())
+                .map(str::trim)
+        })
+        .unwrap_or("direct")
+        .to_string()
+}
+
 /// `GET /i/:token` — resolve a link-token, mint a session cookie, serve the SPA.
 pub async fn enter_link(
     Path(token): Path<String>,
     State(state): State<AppState>,
+    headers: HeaderMap,
     jar: CookieJar,
 ) -> Response {
+    // Throttle link attempts per IP (tokens are 256-bit, so this is defense in
+    // depth against enumeration / hammering, not the primary protection).
+    if !state.limits.login.check(&client_ip(&headers)) {
+        return (StatusCode::TOO_MANY_REQUESTS, "slow down").into_response();
+    }
     match auth::resolve_token(&state.reads, &token).await {
         Ok(Some(p)) => match auth::create_session(&state.db, &p.id).await {
             Ok(session) => {
@@ -110,6 +136,7 @@ pub async fn rooms(
             id,
             kind: "client".to_string(),
             title: None,
+            client_id: Some(p.id.clone()),
             created_at: now_millis(),
         }]
     };

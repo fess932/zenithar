@@ -31,6 +31,9 @@ pub async fn upload(
     if !origin_ok(&headers) {
         return StatusCode::FORBIDDEN.into_response();
     }
+    if !state.limits.uploads.check(&p.id) {
+        return (StatusCode::TOO_MANY_REQUESTS, "too many uploads").into_response();
+    }
 
     let mut room_id: Option<String> = None;
     let mut filename = String::from("file");

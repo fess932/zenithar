@@ -17,6 +17,8 @@ mod calls;
 mod db;
 mod models;
 mod names;
+mod presence;
+mod ratelimit;
 mod recorder;
 mod routes;
 mod state;
@@ -207,6 +209,8 @@ async fn main() -> Result<()> {
         signal: signal_tx,
         calls,
         notify: notify_tx,
+        presence: Arc::new(presence::PresenceRegistry::new()),
+        limits: Arc::new(ratelimit::Limits::default()),
         secure_cookies,
     };
 

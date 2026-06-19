@@ -48,8 +48,22 @@ See [docs/plans/phase-1-auth.md](docs/plans/phase-1-auth.md).
 
 See the roadmap in [requirements.md](requirements.md).
 
+## Deploy (self-host)
+
+One self-contained container; state in a `./data` volume. Full guide —
+docker-compose, **host networking for calls**, Caddy + TLS, backups, env — in
+[docs/deploy.md](docs/deploy.md).
+
+```sh
+mkdir -p data && docker compose up -d   # then open the admin link from the logs
+```
+
 ## Config (env)
 
 - `ZENITHAR_BIND` — listen address (default `127.0.0.1:3000`)
 - `ZENITHAR_DB` — SQLite path (default `data/zenithar.db`, relative to `backend/`)
+- `ZENITHAR_ATTACHMENTS` — uploads dir (default `<data>/attachments`)
+- `ZENITHAR_RECORDINGS` — call recordings dir (default `<data>/recordings`)
+- `ZENITHAR_STUN` — comma-separated STUN URLs for WebRTC ICE (empty = LAN/localhost)
 - `ZENITHAR_SECURE_COOKIES` — set `1`/`true` to mark auth cookies `Secure` (behind TLS)
+- `RUST_LOG` — log filter (default `info`)

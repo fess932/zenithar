@@ -332,6 +332,31 @@ test("browser: anonymous message notifies employees (toast + unread badge)", asy
   await ctx.close();
 });
 
+test("browser: presence counts online employees in the drawer", async ({ page, browser }) => {
+  await page.goto(ADMIN_LINK);
+  await expect(page.locator('.beacon[data-state="live"]')).toBeVisible({ timeout: 10000 });
+
+  // Mint a second employee and sign them in elsewhere.
+  const created = await page.evaluate(async () => {
+    const r = await fetch("/api/principals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "user" }),
+    });
+    return r.json();
+  });
+  const ctx = await browser.newContext();
+  const emp = await ctx.newPage();
+  await emp.goto(created.url);
+  await expect(emp.locator('.beacon[data-state="live"]')).toBeVisible({ timeout: 10000 });
+
+  // Admin opens the rooms drawer; the common room shows 2 employees online.
+  await page.getByRole("button", { name: /Чаты|Chats/ }).click();
+  await expect(page.getByRole("button", { name: /командная|team room/ })).toContainText("2");
+
+  await ctx.close();
+});
+
 test("api: create an anonymous client (link + room)", async ({ playwright, baseURL }) => {
   const admin = await playwright.request.newContext({ baseURL });
   await admin.get(ADMIN_LINK);

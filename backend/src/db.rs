@@ -369,7 +369,7 @@ pub async fn set_call_recording(
 /// the client's display name), oldest client first.
 pub async fn list_rooms_for_user(reads: &SqlitePool) -> sqlx::Result<Vec<RoomSummary>> {
     let rooms = sqlx::query_as::<_, RoomSummary>(
-        "SELECT r.id, r.kind, p.display_name AS title, r.created_at
+        "SELECT r.id, r.kind, p.display_name AS title, r.client_id AS client_id, r.created_at
          FROM rooms r
          LEFT JOIN principals p ON p.id = r.client_id
          ORDER BY (r.kind = 'common') DESC, r.created_at ASC, r.id ASC",

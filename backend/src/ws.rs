@@ -9,6 +9,7 @@ use ulid::Ulid;
 use crate::auth::{Identity, Principal};
 use crate::db;
 use crate::models::{ChatMessage, ClientNotice, Inbound, Outbound};
+use crate::ratelimit::LocalBucket;
 use crate::state::AppState;
 use crate::writer::WriteCmd;
 
@@ -58,6 +59,25 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
         return;
     }
 
+    // Presence: mark online (others get a delta), then hand this socket the
+    // current roster. Subscribe after join so we don't echo our own delta.
+    state.presence.join(&principal.id, &principal.kind);
+    let mut presrx = state.presence.subscribe();
+    {
+        let frame = Outbound::PresenceSnapshot {
+            online: state.presence.snapshot(),
+        };
+        if let Ok(json) = serde_json::to_string(&frame) {
+            if sender.send(Message::Text(json.into())).await.is_err() {
+                state.presence.leave(&principal.id);
+                return;
+            }
+        }
+    }
+
+    // Per-socket message rate limit: burst 10, ~1/s sustained.
+    let mut msg_bucket = LocalBucket::new(10.0, 1.0);
+
     loop {
         tokio::select! {
             biased;
@@ -92,6 +112,10 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                         }
                     }
                     Inbound::Msg { body, client_msg_id, attachment_ids, reply_to } => {
+                        if !msg_bucket.check() {
+                            debug!("message rate-limited");
+                            continue;
+                        }
                         // Resolve up to 5 attachments, each must belong to this room.
                         let mut attachments = Vec::new();
                         let mut bad = false;
@@ -220,6 +244,21 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                 }
             }
 
+            // Presence fan-out: forward online/offline deltas to this client.
+            pres = presrx.recv() => {
+                match pres {
+                    Ok(frame) => {
+                        if let Ok(json) = serde_json::to_string(&frame) {
+                            if sender.send(Message::Text(json.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    Err(RecvError::Lagged(_)) => {}
+                    Err(RecvError::Closed) => break,
+                }
+            }
+
             // Broadcast fan-out: forward only the active room (no cross-room leak).
             bcast = rx.recv() => {
                 match bcast {
@@ -238,6 +277,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
             }
         }
     }
+    state.presence.leave(&principal.id);
     info!("websocket closed");
 }
 
