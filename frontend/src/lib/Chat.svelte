@@ -95,7 +95,7 @@
   <Principals onBack={() => (view = "chat")} />
 {:else}
   <div
-    class="grid h-dvh w-full max-w-full grid-rows-[auto_1fr_auto] overflow-x-hidden bg-ink font-sans text-[15px] text-text"
+    class="grid h-dvh w-full max-w-full grid-cols-[minmax(0,1fr)] grid-rows-[auto_1fr_auto] overflow-x-hidden bg-ink font-sans text-[0.9375rem] text-text"
   >
     <Header
       onOpenAdmin={() => (view = "admin")}

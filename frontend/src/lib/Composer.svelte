@@ -136,7 +136,7 @@
   }
 </script>
 
-<div class="border-t border-line bg-surface px-3 pt-[0.6rem] pb-[calc(0.6rem+env(safe-area-inset-bottom))] sm:px-5">
+<div class="min-w-0 w-full border-t border-line bg-surface px-3 pt-[0.6rem] pb-[calc(0.6rem+env(safe-area-inset-bottom))] sm:px-5">
   <!-- reply target (Telegram-style): quoted line above the input -->
   {#if $replyingTo}
     <div class="mb-2 flex items-center gap-2 rounded-md border-l-2 border-beacon bg-surface-2 py-1 pl-2 pr-1">
@@ -255,7 +255,7 @@
         aria-label={$t("messageAria")}
         maxlength="4000"
         disabled={uploading}
-        class="min-h-11 min-w-0 flex-1 rounded-md border border-line bg-surface-2 px-3 text-base text-text placeholder:text-muted focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-beacon disabled:opacity-60 sm:text-[15px]"
+        class="min-h-11 min-w-0 flex-1 rounded-md border border-line bg-surface-2 px-3 text-base text-text placeholder:text-muted focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-beacon disabled:opacity-60 sm:text-[0.9375rem]"
       />
 
       {#if canSend}
