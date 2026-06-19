@@ -53,7 +53,7 @@ pub async fn recent_messages(
     limit: i64,
 ) -> Result<Vec<ChatMessage>> {
     let mut rows = sqlx::query_as::<_, ChatMessage>(
-        "SELECT id, room_id, author, body, client_msg_id, created_at
+        "SELECT id, room_id, author_id, author_name, body, client_msg_id, created_at
          FROM messages WHERE room_id = ?1
          ORDER BY id DESC LIMIT ?2",
     )

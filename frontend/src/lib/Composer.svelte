@@ -2,34 +2,21 @@
   import { t } from "./i18n";
   import { send } from "./chat";
 
-  const NAME_KEY = "zenithar.name";
-  let name = localStorage.getItem(NAME_KEY) ?? "";
   let body = "";
 
-  function submit(): void {
+  function submit(e: SubmitEvent): void {
+    e.preventDefault();
     const text = body.trim();
     if (!text) return;
-    if (send(text, name.trim() || "anon")) body = "";
-  }
-
-  function saveName(): void {
-    localStorage.setItem(NAME_KEY, name.trim());
+    if (send(text)) body = "";
   }
 </script>
 
 <form
-  on:submit|preventDefault={submit}
+  onsubmit={submit}
   class="flex gap-[0.6rem] border-t border-line bg-surface px-5 py-[0.85rem]"
   autocomplete="off"
 >
-  <input
-    bind:value={name}
-    on:change={saveName}
-    placeholder={$t("namePlaceholder")}
-    aria-label={$t("nameAria")}
-    maxlength="40"
-    class="w-32 rounded-md border border-line bg-surface-2 px-3 py-[0.6rem] font-mono text-[0.85rem] text-text focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-beacon max-[560px]:hidden"
-  />
   <input
     bind:value={body}
     placeholder={$t("messagePlaceholder")}

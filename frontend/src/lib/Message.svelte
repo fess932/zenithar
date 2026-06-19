@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { isMine, type ChatMessage } from "./chat";
+  import type { ChatMessage } from "./chat";
+  import { me } from "./session";
   import { t } from "./i18n";
 
   export let m: ChatMessage;
 
-  const mine = isMine(m);
+  $: mine = $me?.id === m.author_id;
 
   function fmtTime(ms: number): string {
     const d = new Date(ms);
@@ -15,6 +16,6 @@
 
 <div class="line arrived" class:mine>
   <span class="time">{fmtTime(m.created_at)}</span>
-  <span class="who">{mine ? $t("you") : m.author}</span>
+  <span class="who">{mine ? $t("you") : m.author_name}</span>
   <span class="body">{m.body}</span>
 </div>

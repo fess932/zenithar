@@ -1,11 +1,13 @@
 // WebSocket chat state as Svelte stores: the message transcript and the
-// connection status. Sends carry a client id (idempotency); reconnect backs off.
+// connection status. Author comes from the authenticated identity (server-side);
+// sends only carry body + a client id for idempotency.
 import { writable } from "svelte/store";
 
 export interface ChatMessage {
   id: string;
   room_id: string;
-  author: string;
+  author_id: string;
+  author_name: string;
   body: string;
   client_msg_id: string | null;
   created_at: number; // unix millis
@@ -15,13 +17,6 @@ export type Status = "connecting" | "live" | "down";
 
 export const messages = writable<ChatMessage[]>([]);
 export const status = writable<Status>("connecting");
-
-// Ids we sent ourselves, so we can mark our own lines without waiting on the echo.
-const mine = new Set<string>();
-
-export function isMine(m: ChatMessage): boolean {
-  return m.client_msg_id !== null && mine.has(m.client_msg_id);
-}
 
 let ws: WebSocket | null = null;
 let backoff = 500;
@@ -51,10 +46,8 @@ export function connect(): void {
   ws.onerror = () => ws?.close();
 }
 
-export function send(body: string, author: string): boolean {
+export function send(body: string): boolean {
   if (ws?.readyState !== WebSocket.OPEN) return false;
-  const clientMsgId = crypto.randomUUID();
-  mine.add(clientMsgId);
-  ws.send(JSON.stringify({ body, author, client_msg_id: clientMsgId }));
+  ws.send(JSON.stringify({ body, client_msg_id: crypto.randomUUID() }));
   return true;
 }

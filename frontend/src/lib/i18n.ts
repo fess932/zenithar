@@ -12,11 +12,31 @@ const ru = {
   reconnecting: "переподключение",
   empty: "Пока тишина. Напишите команде.",
   you: "вы",
-  namePlaceholder: "вы",
-  nameAria: "Ваше имя",
   messagePlaceholder: "Написать команде…",
   messageAria: "Сообщение",
   send: "Отправить",
+  // session
+  landingTitle: "Вход по ссылке",
+  landingHint: "Откройте свою персональную ссылку-приглашение, чтобы войти.",
+  logout: "Выйти",
+  editNameAria: "Изменить имя",
+  saveName: "Сохранить",
+  // admin
+  adminLinks: "Ссылки",
+  back: "Назад",
+  newLink: "Новая ссылка",
+  roleUser: "Сотрудник",
+  roleClient: "Анонимный клиент",
+  nameOptional: "Имя (необязательно)",
+  create: "Создать",
+  copy: "Копировать",
+  copied: "Скопировано",
+  rotate: "Перевыпустить",
+  revoke: "Отозвать",
+  active: "активна",
+  revoked: "отозвана",
+  noPrincipals: "Пока нет ни одной ссылки. Создайте первую.",
+  freshLink: "Свежая ссылка (показывается один раз)",
 } as const;
 
 const en: Record<keyof typeof ru, string> = {
@@ -27,11 +47,29 @@ const en: Record<keyof typeof ru, string> = {
   reconnecting: "reconnecting",
   empty: "No signals yet. Say something to the team.",
   you: "you",
-  namePlaceholder: "you",
-  nameAria: "Your name",
   messagePlaceholder: "Message the team…",
   messageAria: "Message",
   send: "Send",
+  landingTitle: "Sign in by link",
+  landingHint: "Open your personal invite link to enter.",
+  logout: "Log out",
+  editNameAria: "Edit name",
+  saveName: "Save",
+  adminLinks: "Links",
+  back: "Back",
+  newLink: "New link",
+  roleUser: "Employee",
+  roleClient: "Anonymous client",
+  nameOptional: "Name (optional)",
+  create: "Create",
+  copy: "Copy",
+  copied: "Copied",
+  rotate: "Reissue",
+  revoke: "Revoke",
+  active: "active",
+  revoked: "revoked",
+  noPrincipals: "No links yet. Create the first one.",
+  freshLink: "Fresh link (shown once)",
 };
 
 export type Key = keyof typeof ru;
@@ -47,7 +85,6 @@ function readStored(): Lang {
 
 export const lang = writable<Lang>(readStored());
 
-// Persist the choice and keep document chrome in sync.
 lang.subscribe((l) => {
   try {
     localStorage.setItem(LANG_KEY, l);
@@ -58,7 +95,6 @@ lang.subscribe((l) => {
   document.title = dicts[l].title;
 });
 
-/** Reactive translator: `$t('send')` re-renders when the language changes. */
 export const t = derived(
   lang,
   ($l) =>

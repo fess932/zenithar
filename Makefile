@@ -77,6 +77,11 @@ fe-typecheck: fe-install ## Type-check frontend
 	$(BUN) bun run typecheck
 
 # ---- aggregate --------------------------------------------------------------
+.PHONY: e2e
+e2e: fe-build ## Run local end-to-end tests (ephemeral server on a temp DB)
+	$(CARGO) cargo build
+	bash tests/run.sh
+
 .PHONY: test
 test: be-test fe-typecheck ## Run all tests / checks
 
@@ -87,6 +92,16 @@ lint: be-lint be-fmt-check fe-typecheck ## Lint everything
 fmt: be-fmt ## Format everything
 
 # ---- housekeeping -----------------------------------------------------------
+.PHONY: kill
+kill: ## Kill stray dev/test processes (servers, Playwright browsers, leftover bun)
+	@echo "killing stray zenithar/test processes…"
+	-@pkill -9 -f 'target/debug/zenithar-backend' 2>/dev/null || true
+	-@pkill -9 -f 'target/release/zenithar-backend' 2>/dev/null || true
+	-@pkill -9 -f 'chrome-headless-shell' 2>/dev/null || true
+	-@pkill -9 -f 'ms-playwright' 2>/dev/null || true
+	-@pkill -9 -f 'tests/e2e.spec.ts' 2>/dev/null || true
+	@echo "done."
+
 .PHONY: db-reset
 db-reset: ## Delete the local SQLite database
 	rm -f $(BACKEND)/data/*.db $(BACKEND)/data/*.db-wal $(BACKEND)/data/*.db-shm

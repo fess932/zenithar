@@ -5,18 +5,18 @@ use serde::{Deserialize, Serialize};
 pub struct ChatMessage {
     pub id: String, // ULID, app-generated so we can broadcast before the DB commit
     pub room_id: String,
-    pub author: String,
+    pub author_id: String,
+    pub author_name: String,
     pub body: String,
     pub client_msg_id: Option<String>,
     pub created_at: i64, // unix millis
 }
 
-/// What a client sends over the WebSocket.
+/// What a client sends over the WebSocket. The author is taken from the
+/// authenticated identity, never from the client.
 #[derive(Debug, Deserialize)]
 pub struct IncomingMessage {
     pub body: String,
-    #[serde(default)]
-    pub author: Option<String>,
     #[serde(default)]
     pub client_msg_id: Option<String>,
 }
