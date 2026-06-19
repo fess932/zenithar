@@ -25,6 +25,7 @@ use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS};
 use webrtc::api::setting_engine::SettingEngine;
 use webrtc::api::{APIBuilder, API};
+use webrtc::ice::network_type::NetworkType;
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 use webrtc::ice_transport::ice_candidate_type::RTCIceCandidateType;
 use webrtc::ice_transport::ice_server::RTCIceServer;
@@ -132,6 +133,12 @@ impl CallRegistry {
         let mut setting = SettingEngine::default();
         if !public_ips.is_empty() {
             setting.set_nat_1to1_ips(public_ips, RTCIceCandidateType::Srflx);
+            // Restrict ICE to IPv4 UDP. The 1:1 mapping above only knows our IPv4
+            // public address, so an IPv6 (`[::]`) socket would gather a candidate
+            // the mapper can't translate ("external mapped IP not found") and the
+            // whole gather yields nothing. A NAT'd self-host has no usable IPv6
+            // anyway, so drop it and keep the media path on UDP/IPv4.
+            setting.set_network_types(vec![NetworkType::Udp4]);
         }
 
         let api = APIBuilder::new()
