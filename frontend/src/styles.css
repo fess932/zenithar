@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+/* Tell Tailwind where utility classes live (CLI runs from frontend/). */
+@source "./**/*.{html,svelte}";
+
+/* Design tokens → Tailwind utilities (bg-ink, text-muted, font-mono, …).
+   Self-hosted tool: no external fonts, identity comes from these. */
+@theme {
+  --color-ink: #141821; /* deep slate, not pure black */
+  --color-surface: #1a1f29;
+  --color-surface-2: #20262f;
+  --color-line: #2a313d;
+  --color-text: #e7eaf0;
+  --color-muted: #828d9e;
+  --color-beacon: #e8b04b; /* warm signal gold */
+  --color-you: #6fb3c9; /* cool tone marks your own lines */
+  --color-bad: #d9694e;
+
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code",
+    Menlo, Consolas, monospace;
+
+  --animate-beacon: beacon-pulse 2.4s ease-out infinite;
+  --animate-arrived: arrived-flash 1.1s ease-out;
+}
+
+@keyframes beacon-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgb(232 176 75 / 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgb(232 176 75 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(232 176 75 / 0);
+  }
+}
+@keyframes arrived-flash {
+  from {
+    border-left-color: var(--color-beacon);
+    background: var(--color-surface-2);
+  }
+  to {
+    border-left-color: transparent;
+    background: transparent;
+  }
+}
+
+/* Stateful / animated pieces — composed from Tailwind utilities via @apply. */
+@layer components {
+  /* Transcript row: time · who · message, collapsing on narrow screens. */
+  .line {
+    @apply grid grid-cols-[5.5rem_8rem_1fr] gap-3 border-l-2 border-transparent px-5 py-[0.12rem];
+  }
+  .line:hover {
+    @apply bg-surface;
+  }
+  .line .time {
+    @apply pt-[0.12rem] text-right font-mono text-[0.74rem] text-muted;
+  }
+  .line .who {
+    @apply truncate font-mono text-[0.8rem] text-muted;
+  }
+  .line .body {
+    @apply break-words;
+  }
+  .line.mine {
+    @apply border-you;
+  }
+  .line.mine .who {
+    @apply text-you;
+  }
+  .line.arrived {
+    animation: var(--animate-arrived);
+  }
+
+  @media (max-width: 560px) {
+    .line {
+      @apply grid-cols-[4.5rem_1fr];
+    }
+    .line .who {
+      @apply text-you;
+      grid-column: 2;
+    }
+    .line .time {
+      grid-row: 1 / 3;
+    }
+  }
+
+  /* Connection beacon — state lives on .beacon[data-state]. */
+  .beacon-dot {
+    @apply size-2 rounded-full bg-muted;
+  }
+  .beacon[data-state="live"] {
+    @apply text-beacon;
+  }
+  .beacon[data-state="live"] .beacon-dot {
+    @apply animate-beacon bg-beacon;
+  }
+  .beacon[data-state="down"] {
+    @apply text-bad;
+  }
+  .beacon[data-state="down"] .beacon-dot {
+    @apply bg-bad;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .beacon-dot,
+  .line.arrived {
+    animation: none !important;
+  }
+}
