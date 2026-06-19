@@ -1,6 +1,7 @@
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 
+use crate::models::ChatMessage;
 use crate::writer::WriteTx;
 
 /// Shared application state. `reads` is the read-only pool; `db` is the
@@ -8,7 +9,8 @@ use crate::writer::WriteTx;
 #[derive(Clone)]
 pub struct AppState {
     pub writes: WriteTx,
-    pub broadcast: broadcast::Sender<String>,
+    /// Live messages fan out here; each socket forwards only its active room.
+    pub broadcast: broadcast::Sender<ChatMessage>,
     pub reads: SqlitePool,
     pub db: SqlitePool,
     /// Set Secure on auth cookies (enable behind TLS).

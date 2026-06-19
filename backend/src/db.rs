@@ -4,7 +4,9 @@ use anyhow::Result;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::SqlitePool;
 
-use crate::models::ChatMessage;
+use ulid::Ulid;
+
+use crate::models::{ChatMessage, RoomSummary};
 
 const MIGRATION: &str = include_str!("../migrations/0001_init.sql");
 
@@ -64,4 +66,50 @@ pub async fn recent_messages(
 
     rows.reverse(); // query was DESC for the LIMIT; hand back oldest-first
     Ok(rows)
+}
+
+/// The dedicated room for a client, creating it on first need. Idempotent —
+/// callers (principal creation, client connect) can call it freely. Uses the
+/// write pool.
+pub async fn ensure_client_room(write: &SqlitePool, client_id: &str) -> sqlx::Result<String> {
+    if let Some((id,)) = sqlx::query_as::<_, (String,)>("SELECT id FROM rooms WHERE client_id = ?1")
+        .bind(client_id)
+        .fetch_optional(write)
+        .await?
+    {
+        return Ok(id);
+    }
+    let id = Ulid::new().to_string();
+    sqlx::query(
+        "INSERT INTO rooms (id, kind, client_id, created_at) VALUES (?1, 'client', ?2, ?3)",
+    )
+    .bind(&id)
+    .bind(client_id)
+    .bind(crate::now_millis())
+    .execute(write)
+    .await?;
+    Ok(id)
+}
+
+/// Whether a room exists (employee join validation; employees may open any room).
+pub async fn room_exists(reads: &SqlitePool, room_id: &str) -> sqlx::Result<bool> {
+    let row = sqlx::query_as::<_, (i64,)>("SELECT 1 FROM rooms WHERE id = ?1 LIMIT 1")
+        .bind(room_id)
+        .fetch_optional(reads)
+        .await?;
+    Ok(row.is_some())
+}
+
+/// Rooms an employee can see: common first, then each client room (titled with
+/// the client's display name), oldest client first.
+pub async fn list_rooms_for_user(reads: &SqlitePool) -> sqlx::Result<Vec<RoomSummary>> {
+    let rooms = sqlx::query_as::<_, RoomSummary>(
+        "SELECT r.id, r.kind, p.display_name AS title, r.created_at
+         FROM rooms r
+         LEFT JOIN principals p ON p.id = r.client_id
+         ORDER BY (r.kind = 'common') DESC, r.created_at ASC, r.id ASC",
+    )
+    .fetch_all(reads)
+    .await?;
+    Ok(rooms)
 }

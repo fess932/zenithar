@@ -55,18 +55,20 @@
 </script>
 
 <div class="grid h-dvh grid-rows-[auto_1fr] bg-ink text-text">
-  <header class="flex items-center gap-3.5 border-b border-line bg-surface px-5 py-[0.9rem]">
+  <header
+    class="flex items-center gap-3.5 border-b border-line bg-surface px-3 pt-[calc(0.7rem+env(safe-area-inset-top))] pb-[0.7rem] sm:px-5"
+  >
     <button
       type="button"
       onclick={onBack}
-      class="cursor-pointer font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted hover:text-text"
+      class="-ml-1 inline-flex min-h-9 cursor-pointer items-center px-1 font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted hover:text-text"
     >
       ← {$t("back")}
     </button>
     <span class="font-mono text-[0.78rem] text-muted">{$t("adminLinks")}</span>
   </header>
 
-  <main class="overflow-y-auto px-5 py-4">
+  <main class="overflow-y-auto px-3 py-4 sm:px-5">
     <!-- create -->
     <section class="mb-6 max-w-2xl">
       <h2 class="mb-2 text-[0.8rem] font-semibold uppercase tracking-[0.08em] text-muted">
@@ -75,7 +77,7 @@
       <div class="flex flex-wrap items-center gap-2">
         <select
           bind:value={kind}
-          class="rounded-md border border-line bg-surface-2 px-2 py-[0.45rem] font-mono text-[0.8rem] text-text"
+          class="min-h-11 rounded-md border border-line bg-surface-2 px-2 font-mono text-[0.85rem] text-text"
         >
           <option value="client">{$t("roleClient")}</option>
           <option value="user">{$t("roleUser")}</option>
@@ -84,12 +86,12 @@
           bind:value={name}
           placeholder={$t("nameOptional")}
           maxlength="40"
-          class="flex-1 rounded-md border border-line bg-surface-2 px-3 py-[0.45rem] text-[0.85rem] text-text placeholder:text-muted focus-visible:outline-2 focus-visible:outline-beacon"
+          class="min-h-11 min-w-0 flex-1 rounded-md border border-line bg-surface-2 px-3 text-base text-text placeholder:text-muted focus-visible:outline-2 focus-visible:outline-beacon sm:text-[0.9rem]"
         />
         <button
           type="button"
           onclick={create}
-          class="cursor-pointer rounded-md border border-beacon bg-beacon px-3 py-[0.45rem] font-semibold text-[#1a1206] hover:brightness-110"
+          class="min-h-11 w-full cursor-pointer rounded-md border border-beacon bg-beacon px-4 font-semibold text-[#1a1206] hover:brightness-110 sm:w-auto"
         >
           {$t("create")}
         </button>
@@ -120,36 +122,40 @@
     {:else}
       <ul class="max-w-2xl divide-y divide-line">
         {#each rows as p (p.id)}
-          <li class="flex items-center gap-3 py-2">
-            <span
-              class="font-mono text-[0.7rem] uppercase tracking-[0.06em]"
-              class:text-you={p.kind === "user"}
-              class:text-muted={p.kind !== "user"}
-            >
-              {p.kind === "user" ? $t("roleUser") : $t("roleClient")}
-            </span>
-            <span class="flex-1 truncate text-[0.9rem]">{p.display_name}</span>
-            <span
-              class="font-mono text-[0.7rem]"
-              class:text-beacon={p.active}
-              class:text-muted={!p.active}
-            >
-              {p.active ? $t("active") : $t("revoked")}
-            </span>
-            <button
-              type="button"
-              onclick={() => rotate(p.id)}
-              class="cursor-pointer font-mono text-[0.72rem] text-muted hover:text-text"
-            >
-              {$t("rotate")}
-            </button>
-            <button
-              type="button"
-              onclick={() => revoke(p.id)}
-              class="cursor-pointer font-mono text-[0.72rem] text-muted hover:text-bad"
-            >
-              {$t("revoke")}
-            </button>
+          <li class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:gap-3 sm:py-2">
+            <div class="flex min-w-0 items-center gap-3 sm:flex-1">
+              <span
+                class="font-mono text-[0.7rem] uppercase tracking-[0.06em]"
+                class:text-you={p.kind === "user"}
+                class:text-muted={p.kind !== "user"}
+              >
+                {p.kind === "user" ? $t("roleUser") : $t("roleClient")}
+              </span>
+              <span class="min-w-0 flex-1 truncate text-[0.9rem]">{p.display_name}</span>
+              <span
+                class="font-mono text-[0.7rem]"
+                class:text-beacon={p.active}
+                class:text-muted={!p.active}
+              >
+                {p.active ? $t("active") : $t("revoked")}
+              </span>
+            </div>
+            <div class="flex gap-1 self-end sm:self-auto">
+              <button
+                type="button"
+                onclick={() => rotate(p.id)}
+                class="inline-flex min-h-9 cursor-pointer items-center rounded-md px-2 font-mono text-[0.72rem] text-muted hover:bg-surface-2 hover:text-text"
+              >
+                {$t("rotate")}
+              </button>
+              <button
+                type="button"
+                onclick={() => revoke(p.id)}
+                class="inline-flex min-h-9 cursor-pointer items-center rounded-md px-2 font-mono text-[0.72rem] text-muted hover:bg-surface-2 hover:text-bad"
+              >
+                {$t("revoke")}
+              </button>
+            </div>
           </li>
         {/each}
       </ul>

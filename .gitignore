@@ -2,6 +2,7 @@
 # will have compiled files and executables
 debug
 target
+.DS_Store
 
 # Runtime data — SQLite DB (+ WAL/SHM), attachments, call recordings. Never commit.
 data/

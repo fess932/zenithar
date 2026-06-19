@@ -9,8 +9,10 @@ use axum_extra::extract::cookie::CookieJar;
 use serde::{Deserialize, Serialize};
 
 use crate::auth::{self, Admin, Identity, Principal, PrincipalSummary, SESSION_COOKIE};
+use crate::models::RoomSummary;
 use crate::names;
 use crate::state::AppState;
+use crate::{db, now_millis};
 
 /// Reject cross-origin mutations. If there's no Origin (non-browser client) we
 /// allow it; SameSite=Lax already covers the common browser CSRF case.
@@ -88,6 +90,32 @@ pub async fn rename(
     }
 }
 
+// ---- rooms -----------------------------------------------------------------
+
+/// `GET /api/rooms` — rooms the caller may open. Clients get their single room
+/// (created on demand); employees get common + every client room.
+pub async fn rooms(
+    State(state): State<AppState>,
+    Identity(p): Identity,
+) -> Result<Json<Vec<RoomSummary>>, StatusCode> {
+    let list = if p.kind == "user" {
+        db::list_rooms_for_user(&state.reads)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    } else {
+        let id = db::ensure_client_room(&state.db, &p.id)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        vec![RoomSummary {
+            id,
+            kind: "client".to_string(),
+            title: None,
+            created_at: now_millis(),
+        }]
+    };
+    Ok(Json(list))
+}
+
 // ---- admin: principals (links) ---------------------------------------------
 
 #[derive(Deserialize)]
@@ -132,6 +160,10 @@ pub async fn create_principal(
 
 async fn issue_for_new(state: &AppState, kind: &str, name: &str) -> sqlx::Result<LinkResp> {
     let p = auth::create_principal(&state.db, kind, name, false).await?;
+    // A client gets a dedicated room up front so employees see it immediately.
+    if kind == "client" {
+        db::ensure_client_room(&state.db, &p.id).await?;
+    }
     let token = auth::issue_token(&state.db, &p.id, None).await?;
     Ok(LinkResp {
         principal_id: p.id,

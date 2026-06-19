@@ -75,7 +75,7 @@
 
   @media (max-width: 560px) {
     .line {
-      @apply grid-cols-[4.5rem_1fr];
+      @apply grid-cols-[4.5rem_1fr] px-3;
     }
     .line .who {
       @apply text-you;

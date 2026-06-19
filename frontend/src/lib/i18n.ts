@@ -7,6 +7,8 @@ export type Lang = "ru" | "en";
 const ru = {
   title: "Zenithar — командная",
   room: "командная",
+  rooms: "Чаты",
+  noRooms: "Пока нет чатов.",
   connecting: "подключение",
   live: "на связи",
   reconnecting: "переподключение",
@@ -19,6 +21,7 @@ const ru = {
   landingTitle: "Вход по ссылке",
   landingHint: "Откройте свою персональную ссылку-приглашение, чтобы войти.",
   logout: "Выйти",
+  menu: "Меню",
   editNameAria: "Изменить имя",
   saveName: "Сохранить",
   // admin
@@ -42,6 +45,8 @@ const ru = {
 const en: Record<keyof typeof ru, string> = {
   title: "Zenithar — team room",
   room: "team room",
+  rooms: "Chats",
+  noRooms: "No chats yet.",
   connecting: "connecting",
   live: "live",
   reconnecting: "reconnecting",
@@ -53,6 +58,7 @@ const en: Record<keyof typeof ru, string> = {
   landingTitle: "Sign in by link",
   landingHint: "Open your personal invite link to enter.",
   logout: "Log out",
+  menu: "Menu",
   editNameAria: "Edit name",
   saveName: "Save",
   adminLinks: "Links",

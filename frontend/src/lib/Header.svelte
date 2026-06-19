@@ -13,6 +13,7 @@
 
   let editing = false;
   let draft = "";
+  let menuOpen = false;
 
   function startEdit(): void {
     if ($me?.kind !== "user") return; // clients are anonymous
@@ -26,11 +27,15 @@
   }
 </script>
 
-<header class="flex items-center gap-3.5 border-b border-line bg-surface px-5 py-[0.9rem]">
-  <span class="text-[0.82rem] font-bold uppercase tracking-[0.22em]">Zenithar</span>
-  <span class="font-mono text-[0.78rem] text-muted">{$t("room")}</span>
+<header
+  class="relative flex items-center gap-2 border-b border-line bg-surface px-3 pt-[calc(0.7rem+env(safe-area-inset-top))] pb-[0.7rem] sm:gap-3.5 sm:px-5"
+>
+  <span class="text-[0.78rem] font-bold uppercase tracking-[0.2em] sm:text-[0.82rem] sm:tracking-[0.22em]"
+    >Zenithar</span
+  >
+  <span class="hidden font-mono text-[0.78rem] text-muted sm:inline">{$t("room")}</span>
 
-  <div class="ml-auto flex items-center gap-[1.1rem]">
+  <div class="ml-auto flex items-center gap-2 sm:gap-[1.1rem]">
     {#if $me}
       {#if editing}
         <input
@@ -39,14 +44,14 @@
           onkeydown={(e) => e.key === "Enter" && saveEdit()}
           maxlength="40"
           aria-label={$t("editNameAria")}
-          class="w-36 rounded-md border border-line bg-surface-2 px-2 py-[0.2rem] font-mono text-[0.78rem] text-text focus-visible:outline-2 focus-visible:outline-beacon"
+          class="w-32 rounded-md border border-line bg-surface-2 px-2 py-[0.3rem] font-mono text-[0.8rem] text-text focus-visible:outline-2 focus-visible:outline-beacon sm:w-36"
         />
       {:else}
         <button
           type="button"
           onclick={startEdit}
           title={$me.kind === "user" ? $t("editNameAria") : ""}
-          class="font-mono text-[0.78rem] text-you"
+          class="max-w-[34vw] truncate font-mono text-[0.78rem] text-you sm:max-w-none"
           class:cursor-pointer={$me.kind === "user"}
           class:cursor-default={$me.kind !== "user"}
         >
@@ -69,36 +74,95 @@
       class="beacon flex items-center gap-2 font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted"
       data-state={$status}
     >
-      <span class="beacon-dot"></span><span>{$t(statusKey[$status])}</span>
+      <span class="beacon-dot"></span><span class="hidden sm:inline">{$t(statusKey[$status])}</span>
     </span>
 
-    <div class="flex overflow-hidden rounded-md border border-line" role="group" aria-label="Language">
-      <button
-        type="button"
-        aria-pressed={$lang === "ru"}
-        onclick={() => lang.set("ru")}
-        class="cursor-pointer bg-transparent px-2 py-[0.22rem] font-mono text-[0.68rem] tracking-[0.06em] text-muted hover:text-text aria-[pressed=true]:bg-surface-2 aria-[pressed=true]:text-beacon"
-      >
-        RU
-      </button>
-      <button
-        type="button"
-        aria-pressed={$lang === "en"}
-        onclick={() => lang.set("en")}
-        class="cursor-pointer border-l border-line bg-transparent px-2 py-[0.22rem] font-mono text-[0.68rem] tracking-[0.06em] text-muted hover:text-text aria-[pressed=true]:bg-surface-2 aria-[pressed=true]:text-beacon"
-      >
-        EN
-      </button>
+    <!-- Desktop: language + logout inline -->
+    <div class="hidden items-center gap-[1.1rem] sm:flex">
+      <div class="flex overflow-hidden rounded-md border border-line" role="group" aria-label="Language">
+        <button
+          type="button"
+          aria-pressed={$lang === "ru"}
+          onclick={() => lang.set("ru")}
+          class="cursor-pointer bg-transparent px-2 py-[0.22rem] font-mono text-[0.68rem] tracking-[0.06em] text-muted hover:text-text aria-[pressed=true]:bg-surface-2 aria-[pressed=true]:text-beacon"
+        >
+          RU
+        </button>
+        <button
+          type="button"
+          aria-pressed={$lang === "en"}
+          onclick={() => lang.set("en")}
+          class="cursor-pointer border-l border-line bg-transparent px-2 py-[0.22rem] font-mono text-[0.68rem] tracking-[0.06em] text-muted hover:text-text aria-[pressed=true]:bg-surface-2 aria-[pressed=true]:text-beacon"
+        >
+          EN
+        </button>
+      </div>
+
+      {#if $me}
+        <button
+          type="button"
+          onclick={logout}
+          class="cursor-pointer font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted hover:text-bad"
+        >
+          {$t("logout")}
+        </button>
+      {/if}
     </div>
 
-    {#if $me}
-      <button
-        type="button"
-        onclick={logout}
-        class="cursor-pointer font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted hover:text-bad"
-      >
-        {$t("logout")}
-      </button>
-    {/if}
+    <!-- Mobile: overflow menu holding language + logout -->
+    <button
+      type="button"
+      aria-label={$t("menu")}
+      aria-expanded={menuOpen}
+      onclick={() => (menuOpen = !menuOpen)}
+      class="grid size-9 cursor-pointer place-items-center rounded-md border border-line text-muted hover:text-text sm:hidden"
+    >
+      <span class="text-lg leading-none">⋯</span>
+    </button>
   </div>
+
+  {#if menuOpen}
+    <!-- backdrop closes the menu -->
+    <button
+      type="button"
+      aria-label={$t("menu")}
+      onclick={() => (menuOpen = false)}
+      class="fixed inset-0 z-10 cursor-default sm:hidden"
+    ></button>
+    <div
+      class="absolute right-2 top-full z-20 mt-1 flex w-44 flex-col gap-2 rounded-lg border border-line bg-surface-2 p-3 shadow-lg sm:hidden"
+    >
+      <div class="flex overflow-hidden rounded-md border border-line" role="group" aria-label="Language">
+        <button
+          type="button"
+          aria-pressed={$lang === "ru"}
+          onclick={() => lang.set("ru")}
+          class="flex-1 cursor-pointer bg-transparent py-2 font-mono text-[0.72rem] tracking-[0.06em] text-muted hover:text-text aria-[pressed=true]:bg-surface aria-[pressed=true]:text-beacon"
+        >
+          RU
+        </button>
+        <button
+          type="button"
+          aria-pressed={$lang === "en"}
+          onclick={() => lang.set("en")}
+          class="flex-1 cursor-pointer border-l border-line bg-transparent py-2 font-mono text-[0.72rem] tracking-[0.06em] text-muted hover:text-text aria-[pressed=true]:bg-surface aria-[pressed=true]:text-beacon"
+        >
+          EN
+        </button>
+      </div>
+
+      {#if $me}
+        <button
+          type="button"
+          onclick={() => {
+            menuOpen = false;
+            logout();
+          }}
+          class="cursor-pointer rounded-md py-2 font-mono text-[0.74rem] uppercase tracking-[0.08em] text-muted hover:text-bad"
+        >
+          {$t("logout")}
+        </button>
+      {/if}
+    </div>
+  {/if}
 </header>

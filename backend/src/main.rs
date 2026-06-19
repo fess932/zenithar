@@ -126,7 +126,7 @@ async fn main() -> Result<()> {
     let (write_tx, write_rx) = writer::channel();
     tokio::spawn(writer::run(write_pool.clone(), write_rx));
 
-    let (broadcast_tx, _) = broadcast::channel::<String>(256);
+    let (broadcast_tx, _) = broadcast::channel::<models::ChatMessage>(256);
 
     let state = AppState {
         writes: write_tx,
@@ -142,6 +142,7 @@ async fn main() -> Result<()> {
         .route("/i/{token}", get(routes::enter_link))
         .route("/api/me", get(routes::me))
         .route("/api/me/name", post(routes::rename))
+        .route("/api/rooms", get(routes::rooms))
         .route("/api/auth/logout", post(routes::logout))
         .route(
             "/api/principals",

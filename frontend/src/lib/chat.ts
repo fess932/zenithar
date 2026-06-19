@@ -1,7 +1,7 @@
-// WebSocket chat state as Svelte stores: the message transcript and the
-// connection status. Author comes from the authenticated identity (server-side);
-// sends only carry body + a client id for idempotency.
-import { writable } from "svelte/store";
+// WebSocket chat state as Svelte stores: the transcript, the connection status,
+// the rooms the caller can open, and the active room. Author comes from the
+// authenticated identity (server-side); sends only carry body + a client id.
+import { get, writable } from "svelte/store";
 
 export interface ChatMessage {
   id: string;
@@ -13,10 +13,24 @@ export interface ChatMessage {
   created_at: number; // unix millis
 }
 
+export interface RoomSummary {
+  id: string;
+  kind: "common" | "client";
+  title: string | null; // client name; null for the common room
+  created_at: number;
+}
+
 export type Status = "connecting" | "live" | "down";
+
+// Server → client frames.
+type Frame =
+  | { type: "history"; room_id: string; messages: ChatMessage[] }
+  | { type: "message"; message: ChatMessage };
 
 export const messages = writable<ChatMessage[]>([]);
 export const status = writable<Status>("connecting");
+export const rooms = writable<RoomSummary[]>([]);
+export const activeRoom = writable<string | null>(null);
 
 let ws: WebSocket | null = null;
 let backoff = 500;
@@ -29,13 +43,23 @@ export function connect(): void {
   ws.onopen = () => {
     backoff = 500;
     status.set("live");
+    // Restore the room we were viewing (server otherwise picks the default).
+    const want = get(activeRoom);
+    if (want) ws?.send(JSON.stringify({ type: "join", room_id: want }));
   };
   ws.onmessage = (ev) => {
+    let f: Frame;
     try {
-      const m = JSON.parse(ev.data) as ChatMessage;
-      messages.update((all) => [...all, m]);
+      f = JSON.parse(ev.data) as Frame;
     } catch {
-      /* ignore non-JSON frames */
+      return; // ignore non-JSON frames
+    }
+    if (f.type === "history") {
+      activeRoom.set(f.room_id);
+      messages.set(f.messages);
+    } else if (f.type === "message") {
+      if (f.message.room_id !== get(activeRoom)) return; // not the open room
+      messages.update((all) => [...all, f.message]);
     }
   };
   ws.onclose = () => {
@@ -46,8 +70,27 @@ export function connect(): void {
   ws.onerror = () => ws?.close();
 }
 
+/// Switch the open room (employees only; clients have a single room).
+export function joinRoom(room_id: string): void {
+  if (get(activeRoom) === room_id) return;
+  activeRoom.set(room_id);
+  messages.set([]); // history frame will repopulate
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "join", room_id }));
+  }
+}
+
 export function send(body: string): boolean {
   if (ws?.readyState !== WebSocket.OPEN) return false;
-  ws.send(JSON.stringify({ body, client_msg_id: crypto.randomUUID() }));
+  ws.send(JSON.stringify({ type: "msg", body, client_msg_id: crypto.randomUUID() }));
   return true;
+}
+
+export async function loadRooms(): Promise<void> {
+  try {
+    const r = await fetch("/api/rooms");
+    rooms.set(r.ok ? ((await r.json()) as RoomSummary[]) : []);
+  } catch {
+    rooms.set([]);
+  }
 }

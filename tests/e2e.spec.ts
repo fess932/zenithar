@@ -59,6 +59,48 @@ test("browser: admin issues a client link and the client can open it", async ({
   await ctx.close();
 });
 
+test("browser: employee opens a client room; the message routes only there", async ({
+  page,
+  browser,
+}) => {
+  const clientName = `Acme-${Date.now()}`;
+
+  // Admin creates a named client link.
+  await page.goto(ADMIN_LINK);
+  await page.getByRole("button", { name: /Ссылки|Links/ }).click();
+  await page.getByPlaceholder(/необязательно|optional/i).fill(clientName);
+  await page.getByRole("button", { name: /Создать|Create/ }).click();
+  const link = await page.locator("code").first().textContent();
+  expect(link).toContain("/i/");
+
+  // The client opens its link in a fresh context and waits for the socket.
+  const ctx = await browser.newContext();
+  const clientPage = await ctx.newPage();
+  await clientPage.goto(link!);
+  await expect(clientPage.getByPlaceholder(composer)).toBeVisible();
+  await expect(clientPage.locator('.beacon[data-state="live"]')).toBeVisible({ timeout: 10000 });
+
+  // Admin returns to chat and opens the client's room from the drawer.
+  await page.getByRole("button", { name: /Назад|Back/ }).click();
+  await expect(page.locator('.beacon[data-state="live"]')).toBeVisible({ timeout: 10000 });
+  await page.getByRole("button", { name: /Чаты|Chats/ }).click();
+  await page.getByRole("button", { name: clientName }).click();
+
+  // Admin posts into the client room → the client receives it.
+  const msg = `room-${Date.now()}`;
+  const input = page.getByPlaceholder(composer);
+  await input.fill(msg);
+  await input.press("Enter");
+  await expect(clientPage.getByText(msg)).toBeVisible({ timeout: 10000 });
+
+  // Isolation: switching to common does not show the client-room message.
+  await page.getByRole("button", { name: /Чаты|Chats/ }).click();
+  await page.getByRole("button", { name: /командная|team room/ }).click();
+  await expect(page.getByText(msg)).toHaveCount(0);
+
+  await ctx.close();
+});
+
 test("api: auth gate, admin vs client, revoke, logout", async ({ playwright, baseURL }) => {
   const admin = await playwright.request.newContext({ baseURL });
   await admin.get(ADMIN_LINK); // sets the session cookie in this context
