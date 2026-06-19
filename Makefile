@@ -4,6 +4,10 @@
 BACKEND  := backend
 FRONTEND := frontend
 
+# Listen address (override: `make dev BIND=0.0.0.0:8080`).
+BIND ?= 127.0.0.1:3000
+URL  := http://$(BIND)
+
 # Run backend from its own dir so relative paths resolve:
 #   data/  (git-ignored SQLite dir)  and  ../frontend/dist (debug asset reads).
 CARGO := cd $(BACKEND) &&
@@ -25,11 +29,13 @@ build: fe-build be-build ## Full release build: frontend embedded into the binar
 
 .PHONY: run
 run: fe-build ## Build frontend, then run the release server (serves embedded site)
-	$(CARGO) cargo run --release
+	@printf '\n  \033[1mZenithar\033[0m → %s\n\n' '$(URL)'
+	$(CARGO) ZENITHAR_BIND=$(BIND) cargo run --release
 
 .PHONY: dev
 dev: fe-build ## Run the debug server (reads frontend/dist from disk; pair with `make fe-dev`)
-	$(CARGO) cargo run
+	@printf '\n  \033[1mZenithar dev\033[0m → %s\n\n' '$(URL)'
+	$(CARGO) ZENITHAR_BIND=$(BIND) cargo run
 
 # ---- backend (Rust) ---------------------------------------------------------
 .PHONY: be-build
@@ -63,6 +69,7 @@ fe-build: fe-install ## Build frontend bundle into frontend/dist
 
 .PHONY: fe-dev
 fe-dev: fe-install ## Rebuild frontend on change (run alongside `make dev`)
+	@printf '\n  watching frontend — open the app at %s (needs `make dev` running)\n\n' '$(URL)'
 	$(BUN) bun run dev
 
 .PHONY: fe-typecheck
