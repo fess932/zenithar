@@ -54,8 +54,10 @@
         onclick={jumpToReply}
         class="mb-1 flex w-full max-w-md flex-col items-start overflow-hidden rounded border-l-2 border-beacon bg-surface-2/60 px-2 py-1 text-left transition-colors hover:bg-surface-2"
       >
-        <span class="font-mono text-[0.72rem] text-beacon">{m.reply_to.author_name}</span>
-        <span class="line-clamp-1 text-[0.8rem] text-muted">
+        <span class="max-w-full truncate font-mono text-[0.72rem] text-beacon"
+          >{m.reply_to.author_name}</span
+        >
+        <span class="line-clamp-1 max-w-full text-[0.8rem] text-muted">
           {#if m.reply_to.has_attachment && !m.reply_to.body.trim()}📎 {/if}{replyText}
         </span>
       </button>

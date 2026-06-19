@@ -105,7 +105,12 @@
       </div>
     {/if}
 
-    <main bind:this={logEl} onscroll={onScroll} class="overflow-y-auto py-3" aria-live="polite">
+    <main
+      bind:this={logEl}
+      onscroll={onScroll}
+      class="overflow-x-hidden overflow-y-auto py-3"
+      aria-live="polite"
+    >
       {#if $messages.length === 0}
         <p class="px-6 py-10 font-mono text-[0.82rem] text-muted">{$t("empty")}</p>
       {:else}

@@ -350,6 +350,21 @@ pub async fn end_call(write: &SqlitePool, id: &str, ended_at: i64) -> sqlx::Resu
     Ok(())
 }
 
+/// Point a call at its server-side recording (Phase 5). The recordings live as
+/// `<recording_id>.<participant_id>.ogg` under the recordings dir.
+pub async fn set_call_recording(
+    write: &SqlitePool,
+    id: &str,
+    recording_id: &str,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE calls SET recording_id = ?2 WHERE id = ?1")
+        .bind(id)
+        .bind(recording_id)
+        .execute(write)
+        .await?;
+    Ok(())
+}
+
 /// Rooms an employee can see: common first, then each client room (titled with
 /// the client's display name), oldest client first.
 pub async fn list_rooms_for_user(reads: &SqlitePool) -> sqlx::Result<Vec<RoomSummary>> {

@@ -142,7 +142,7 @@
     <div class="mb-2 flex items-center gap-2 rounded-md border-l-2 border-beacon bg-surface-2 py-1 pl-2 pr-1">
       <span class="grid shrink-0 place-items-center text-base text-beacon">↩</span>
       <div class="min-w-0 flex-1">
-        <div class="font-mono text-[0.72rem] text-beacon">{$replyingTo.author_name}</div>
+        <div class="truncate font-mono text-[0.72rem] text-beacon">{$replyingTo.author_name}</div>
         <div class="line-clamp-1 text-[0.8rem] text-muted">
           {#if $replyingTo.attachments.length > 0 && !$replyingTo.body.trim()}📎 {/if}{replyText}
         </div>

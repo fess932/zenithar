@@ -49,7 +49,10 @@
 @layer components {
   /* Transcript row: time · who · message, collapsing on narrow screens. */
   .line {
-    @apply grid grid-cols-[5.5rem_8rem_1fr] gap-3 border-l-2 border-transparent px-5 py-[0.12rem] transition-colors duration-300;
+    @apply grid grid-cols-[5.5rem_8rem_minmax(0,1fr)] gap-3 border-l-2 border-transparent px-5 py-[0.12rem] transition-colors duration-300;
+  }
+  .line .body {
+    @apply min-w-0;
   }
   /* Briefly highlighted when you jump to a quoted original. */
   .line.flash {
@@ -79,7 +82,7 @@
 
   @media (max-width: 560px) {
     .line {
-      @apply grid-cols-[4.5rem_1fr] px-3;
+      @apply grid-cols-[4.5rem_minmax(0,1fr)] px-3;
     }
     .line .who {
       @apply text-you;

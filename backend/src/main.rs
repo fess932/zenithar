@@ -17,6 +17,7 @@ mod calls;
 mod db;
 mod models;
 mod names;
+mod recorder;
 mod routes;
 mod state;
 mod storage;
@@ -184,10 +185,17 @@ async fn main() -> Result<()> {
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .collect();
+    // Call recordings (Phase 5): one Ogg/Opus file per participant, on disk.
+    let recordings_dir = std::env::var("ZENITHAR_RECORDINGS")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| data_dir.join("recordings"));
+    std::fs::create_dir_all(&recordings_dir)?;
+
     let calls = Arc::new(calls::CallRegistry::new(
         stun,
         signal_tx.clone(),
         write_pool.clone(),
+        recordings_dir,
     )?);
 
     let state = AppState {

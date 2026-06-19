@@ -14,6 +14,7 @@
 //! ```
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
 
 use anyhow::Result;
@@ -35,6 +36,7 @@ use webrtc::track::track_local::{TrackLocal, TrackLocalWriter};
 use webrtc::track::track_remote::TrackRemote;
 
 use crate::models::{CallParticipant, Outbound, Signal};
+use crate::recorder::Recorder;
 
 /// One person's leg of a call: their server-side PeerConnection plus the local
 /// track that carries *the other participants'* audio down to them.
@@ -52,6 +54,8 @@ struct Call {
     room_id: String,
     signal: broadcast::Sender<Signal>,
     participants: Mutex<HashMap<String, Arc<Participant>>>,
+    /// Server-side tap of the forwarded Opus (Phase 5).
+    recorder: Recorder,
 }
 
 impl Call {
@@ -95,6 +99,8 @@ pub struct CallRegistry {
     stun: Vec<String>,
     signal: broadcast::Sender<Signal>,
     db: sqlx::SqlitePool,
+    /// Where per-call Ogg/Opus recordings are written.
+    recordings_dir: PathBuf,
     calls: Mutex<HashMap<String, Arc<Call>>>, // keyed by room_id
 }
 
@@ -103,6 +109,7 @@ impl CallRegistry {
         stun: Vec<String>,
         signal: broadcast::Sender<Signal>,
         db: sqlx::SqlitePool,
+        recordings_dir: PathBuf,
     ) -> Result<Self> {
         let mut media = MediaEngine::default();
         media.register_default_codecs()?;
@@ -117,6 +124,7 @@ impl CallRegistry {
             stun,
             signal,
             db,
+            recordings_dir,
             calls: Mutex::new(HashMap::new()),
         })
     }
@@ -159,8 +167,10 @@ impl CallRegistry {
             if let Some(c) = map.get(room_id) {
                 (c.clone(), false)
             } else {
+                let id = Ulid::new().to_string();
                 let call = Arc::new(Call {
-                    id: Ulid::new().to_string(),
+                    recorder: Recorder::new(self.recordings_dir.clone(), &id),
+                    id,
                     room_id: room_id.to_string(),
                     signal: self.signal.clone(),
                     participants: Mutex::new(HashMap::new()),
@@ -221,7 +231,8 @@ impl CallRegistry {
                             // SAFETY of audio quality: same Opus payload, just relayed.
                             let _ = st.write_rtp(&pkt).await;
                         }
-                        // Phase 5 recording tap goes here: recorder.write(&me, &pkt).
+                        // Phase 5 tap: mux the same Opus into this speaker's .ogg.
+                        call.recorder.write(&me, &pkt);
                     }
                 });
             })
@@ -339,8 +350,16 @@ impl CallRegistry {
         }
         if now_empty {
             self.calls.lock().unwrap().remove(&call.room_id);
+            // Finalize the recording before marking the call ended; only point
+            // `recording_id` at it if at least one track was captured.
+            let recorded = call.recorder.finalize();
             if let Err(e) = crate::db::end_call(&self.db, &call.id, crate::now_millis()).await {
                 warn!(error = %e, "failed to log call end");
+            }
+            if recorded {
+                if let Err(e) = crate::db::set_call_recording(&self.db, &call.id, &call.id).await {
+                    warn!(error = %e, "failed to record recording_id");
+                }
             }
             call.emit(
                 None,

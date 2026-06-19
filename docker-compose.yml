@@ -21,7 +21,7 @@ services:
       # Behind TLS (reverse proxy), mark auth cookies Secure:
       # ZENITHAR_SECURE_COOKIES: "1"
       # STUN for WebRTC ICE (comma-separated). Empty works on a LAN/localhost.
-      # ZENITHAR_STUN: "stun:stun.l.google.com:19302"
+      ZENITHAR_STUN: "stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302,stun:stun2.l.google.com:19302,stun:stun.cloudflare.com:3478"
     restart: unless-stopped
     # NOTE: real WebRTC *media* is UDP on ephemeral ports — bridged Docker
     # networking won't forward those. On Linux use host networking for live
