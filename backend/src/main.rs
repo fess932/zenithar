@@ -68,6 +68,34 @@ pub fn now_millis() -> i64 {
         .unwrap_or(0)
 }
 
+/// Self-contained liveness probe: `zenithar-backend healthcheck` exits 0 when the
+/// HTTP server answers `/api/health` with 200, else 1. This lets the shell-less
+/// distroless image carry a Docker HEALTHCHECK without bundling curl/wget — the
+/// one binary checks itself over loopback.
+fn run_healthcheck() -> i32 {
+    use std::io::{Read, Write};
+    let bind = std::env::var("ZENITHAR_BIND").unwrap_or_else(|_| "127.0.0.1:3000".to_string());
+    let port = bind.rsplit(':').next().unwrap_or("3000");
+    let timeout = std::time::Duration::from_secs(3);
+    let Ok(addr) = format!("127.0.0.1:{port}").parse::<std::net::SocketAddr>() else {
+        return 1;
+    };
+    let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, timeout) else {
+        return 1;
+    };
+    let _ = stream.set_read_timeout(Some(timeout));
+    let _ = stream.set_write_timeout(Some(timeout));
+    if stream
+        .write_all(b"GET /api/health HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return 1;
+    }
+    let mut buf = String::new();
+    let _ = stream.read_to_string(&mut buf);
+    i32::from(!buf.lines().next().is_some_and(|l| l.contains(" 200")))
+}
+
 /// On first run (empty DB) create an admin and surface its login link, so
 /// there's someone who can create the rest of the principals from the UI. The
 /// link is logged and saved to `.env` (git-ignored) so it can't be lost.
@@ -105,6 +133,11 @@ fn upsert_env(key: &str, value: &str) -> std::io::Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Health-probe mode (used by the Docker HEALTHCHECK) — check and exit early.
+    if std::env::args().nth(1).as_deref() == Some("healthcheck") {
+        std::process::exit(run_healthcheck());
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();

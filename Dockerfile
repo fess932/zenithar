@@ -38,19 +38,20 @@ RUN touch src/*.rs && cargo build --release
 RUN mkdir -p /seed-data
 
 # 3. Runtime: just the binary on distroless/cc — glibc + libgcc (matches the
-# builder), no shell, no package manager. Runs as the nonroot user (uid 65532).
-FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
+# builder), no shell, no package manager. Runs as root so it can always write a
+# bind-mounted ./data that the host created as root (no manual chown needed).
+FROM gcr.io/distroless/cc-debian12 AS runtime
 COPY --from=backend /app/backend/target/release/zenithar-backend /usr/local/bin/zenithar-backend
 # /data holds the SQLite DB, attachments, future call recordings, and the
-# bootstrap admin link (.env, written to the working dir on first run). Distroless
-# has no shell, so we seed the dir (owned by nonroot) instead of mkdir+chown.
-COPY --from=backend --chown=65532:65532 /seed-data /data
+# bootstrap admin link (.env, written to the working dir on first run).
+COPY --from=backend /seed-data /data
 ENV ZENITHAR_BIND=0.0.0.0:3000 \
     ZENITHAR_DB=/data/zenithar.db \
     ZENITHAR_ATTACHMENTS=/data/attachments \
     RUST_LOG=info
-USER 65532:65532
 WORKDIR /data
 VOLUME ["/data"]
 EXPOSE 3000
+# Health probe lives in docker-compose.yml (the binary can probe itself via
+# `zenithar-backend healthcheck`); no image-level HEALTHCHECK.
 ENTRYPOINT ["zenithar-backend"]

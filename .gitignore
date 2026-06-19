@@ -6,6 +6,7 @@ target
 
 # Runtime data — SQLite DB (+ WAL/SHM), attachments, call recordings. Never commit.
 data/
+data-test/
 
 # Bootstrap admin link / local secrets — written on first run. Never commit.
 .env
