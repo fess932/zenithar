@@ -245,12 +245,28 @@ impl CallRegistry {
         // Advertise our reachable host candidate (public IP in prod, loopback in
         // dev) on the bound port. It rides in the offer SDP, so the client gets it
         // without a separate trickle.
+        //
+        // IMPORTANT: the socket is bound to 0.0.0.0 (to catch the DMZ-forwarded
+        // traffic on any interface), but the candidate — and therefore the
+        // `local_addr` we feed `handle_read` — must be this ADVERTISED address.
+        // The ICE agent matches incoming checks to a known local candidate by that
+        // address; feeding it `0.0.0.0:port` makes it discard every check
+        // ("not a valid local candidate").
         let adv_ip = self
             .public_ips
             .first()
             .cloned()
             .unwrap_or_else(|| "127.0.0.1".to_string());
+        let adv_addr: SocketAddr = format!("{adv_ip}:{}", local_addr.port())
+            .parse()
+            .map_err(|e| anyhow::anyhow!("bad advertised media addr {adv_ip}: {e}"))?;
         pc.add_local_candidate(host_candidate(&adv_ip, local_addr.port())?)?;
+        info!(
+            participant = %principal_id,
+            advertised = %adv_addr,
+            bound = %local_addr,
+            "call leg media socket"
+        );
 
         let offer = pc.create_offer(None)?;
         let offer_sdp = offer.sdp.clone();
@@ -272,10 +288,13 @@ impl CallRegistry {
                 call: call.clone(),
                 my_id: principal_id.to_string(),
                 socket,
-                local_addr,
+                // Feed the ICE agent the advertised candidate address, NOT the
+                // 0.0.0.0 bind addr (see above).
+                local_addr: adv_addr,
                 pc,
                 sender_id,
                 rx,
+                logged_peer: false,
             }
             .run(),
         );
@@ -377,6 +396,9 @@ struct Driver {
     pc: RTCPeerConnection,
     sender_id: RTCRtpSenderId,
     rx: mpsc::UnboundedReceiver<Cmd>,
+    /// One-shot: log the first inbound datagram's source (the client's real,
+    /// post-NAT address) so a deploy can confirm checks are arriving + from where.
+    logged_peer: bool,
 }
 
 impl Driver {
@@ -437,6 +459,15 @@ impl Driver {
                 }
                 r = self.socket.recv_from(&mut buf) => {
                     if let Ok((n, peer)) = r {
+                        if !self.logged_peer {
+                            self.logged_peer = true;
+                            info!(
+                                participant = %self.my_id,
+                                from = %peer,
+                                local = %self.local_addr,
+                                "first inbound media datagram"
+                            );
+                        }
                         let _ = self.pc.handle_read(TaggedBytesMut {
                             now: Instant::now(),
                             transport: TransportContext {
