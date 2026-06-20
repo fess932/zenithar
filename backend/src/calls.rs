@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use anyhow::{Context, Result};
 use tokio::sync::broadcast;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use ulid::Ulid;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS};
@@ -312,17 +312,23 @@ impl CallRegistry {
             let target = target.clone();
             let call_id = call_id.clone();
             Box::pin(async move {
-                let Some(cand) = cand else { return };
+                let Some(cand) = cand else {
+                    debug!("ice gathering complete (end-of-candidates)");
+                    return;
+                };
                 let Ok(init) = cand.to_json() else { return };
                 let Ok(candidate) = serde_json::to_string(&init) else {
                     return;
                 };
-                let _ = sig.send(Signal {
+                // Visibility: what local candidate the server is advertising (e.g.
+                // confirm the nat_1to1 public IP + muxed port show up).
+                let n = sig.send(Signal {
                     room_id: room,
-                    target: Some(target),
+                    target: Some(target.clone()),
                     exclude: None,
-                    frame: Outbound::CallIce { call_id, candidate },
+                    frame: Outbound::CallIce { call_id, candidate: candidate.clone() },
                 });
+                info!(target = %target, %candidate, receivers = n.unwrap_or(0), "server ICE candidate");
             })
         }));
 
