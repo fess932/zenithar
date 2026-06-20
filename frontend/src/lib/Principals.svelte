@@ -10,8 +10,10 @@
     createIntegration,
     rotateIntegration,
     revokeIntegration,
+    listRecordings,
     type PrincipalSummary,
     type IntegrationSummary,
+    type Recording,
     type Link,
   } from "./session";
 
@@ -29,13 +31,26 @@
   let freshToken: string | null = null;
   let tokenCopied = false;
 
+  // call recordings
+  let recordings: Recording[] = [];
+
   onMount(refresh);
 
   async function refresh(): Promise<void> {
-    [rows, integrations] = await Promise.all([
+    [rows, integrations, recordings] = await Promise.all([
       listPrincipals(),
       listIntegrations(),
+      listRecordings(),
     ]);
+  }
+
+  function fmtWhen(ms: number): string {
+    return new Date(ms).toLocaleString();
+  }
+  function fmtLen(started: number, ended: number | null): string {
+    if (ended === null) return "";
+    const s = Math.max(0, Math.round((ended - started) / 1000));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   }
 
   async function addIntegration(): Promise<void> {
@@ -279,6 +294,48 @@
                 >
                   {$t("revoke")}
                 </button>
+              </div>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+
+    <!-- call recordings -->
+    <section class="mt-10 max-w-2xl">
+      <h2 class="mb-2 text-[0.8rem] font-semibold uppercase tracking-[0.08em] text-muted">
+        {$t("recordings")}
+      </h2>
+
+      {#if recordings.length === 0}
+        <p class="font-mono text-[0.82rem] text-muted">{$t("noRecordings")}</p>
+      {:else}
+        <ul class="flex flex-col gap-3">
+          {#each recordings as rec (rec.call_id)}
+            <li class="rounded-md border border-line bg-surface-2 p-3">
+              <div class="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span class="text-[0.9rem] font-semibold text-text">
+                  {rec.room_title ?? $t("commonRoom")}
+                </span>
+                <span class="font-mono text-[0.72rem] text-muted">{fmtWhen(rec.started_at)}</span>
+                {#if fmtLen(rec.started_at, rec.ended_at)}
+                  <span class="font-mono text-[0.72rem] text-muted">
+                    · {fmtLen(rec.started_at, rec.ended_at)}
+                  </span>
+                {/if}
+                {#if rec.started_by_name}
+                  <span class="font-mono text-[0.72rem] text-muted">
+                    · {$t("startedBy")}: {rec.started_by_name}
+                  </span>
+                {/if}
+              </div>
+              <div class="flex flex-col gap-2">
+                {#each rec.tracks as tr (tr.participant_id)}
+                  <div class="flex flex-col gap-1">
+                    <span class="font-mono text-[0.72rem] text-muted">🎙 {tr.participant_name}</span>
+                    <audio controls preload="none" src={tr.url} class="h-9 w-full"></audio>
+                  </div>
+                {/each}
               </div>
             </li>
           {/each}

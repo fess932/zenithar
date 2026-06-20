@@ -10,7 +10,6 @@ use axum::Router;
 use tokio::sync::broadcast;
 use tower_http::trace::TraceLayer;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
 
 mod api;
 mod auth;
@@ -20,10 +19,12 @@ mod models;
 mod names;
 mod presence;
 mod ratelimit;
+mod recordings;
 mod routes;
 mod send;
 mod state;
 mod storage;
+mod telemetry;
 mod uploads;
 mod writer;
 mod ws;
@@ -157,9 +158,8 @@ async fn main() -> Result<()> {
         std::process::exit(run_healthcheck());
     }
 
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
-        .init();
+    // Console logs always; OTLP trace export only if ZENITHAR_OTLP_ENDPOINT is set.
+    let otel = telemetry::init();
 
     let db_path = std::env::var("ZENITHAR_DB").unwrap_or_else(|_| "data/zenithar.db".to_string());
     let bind = bind_addr();
@@ -240,7 +240,7 @@ async fn main() -> Result<()> {
         udp_ports,
         signal_tx.clone(),
         write_pool.clone(),
-        recordings_dir,
+        recordings_dir.clone(),
     )?);
 
     let state = AppState {
@@ -255,6 +255,7 @@ async fn main() -> Result<()> {
         presence: Arc::new(presence::PresenceRegistry::new()),
         limits: Arc::new(ratelimit::Limits::default()),
         secure_cookies,
+        recordings_dir,
     };
 
     let app = Router::new()
@@ -290,6 +291,12 @@ async fn main() -> Result<()> {
             "/api/integrations/{id}/revoke",
             post(routes::revoke_integration),
         )
+        // Admin: listen to saved call recordings.
+        .route("/api/admin/recordings", get(recordings::list))
+        .route(
+            "/api/admin/recordings/{call_id}/{participant_id}",
+            get(recordings::serve),
+        )
         // REST API for integrations (Bearer zk_… auth).
         .route("/api/v1/me", get(api::me))
         .route("/api/v1/rooms", get(api::rooms))
@@ -313,5 +320,6 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     info!(%db_path, "zenithar backend listening on http://{bind}");
     axum::serve(listener, app).await?;
+    telemetry::shutdown(otel); // flush buffered spans on a clean exit
     Ok(())
 }

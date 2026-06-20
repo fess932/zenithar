@@ -29,6 +29,10 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # makes the forwarding logic unit-testable and gives full ICE/socket control.
 rtc = "0.9"
 bytes = "1.12.0"
+opentelemetry = "0.32.0"
+opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.32.0", features = ["http-proto", "reqwest-client"] }
+tracing-opentelemetry = "0.33.0"
 
 [profile.dev]
 # bundled SQLite C compile is the slow part; keep our code fast to iterate

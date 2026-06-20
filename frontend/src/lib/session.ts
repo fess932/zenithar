@@ -121,3 +121,25 @@ export async function rotateIntegration(
 export async function revokeIntegration(id: string): Promise<void> {
   await fetch(`/api/integrations/${id}/revoke`, { method: "POST" });
 }
+
+// ---- call recordings -------------------------------------------------------
+
+export interface RecordingTrack {
+  participant_id: string;
+  participant_name: string;
+  url: string;
+}
+
+export interface Recording {
+  call_id: string;
+  room_title: string | null; // client name; null = common room
+  started_by_name: string | null;
+  started_at: number;
+  ended_at: number | null;
+  tracks: RecordingTrack[];
+}
+
+export async function listRecordings(): Promise<Recording[]> {
+  const r = await fetch("/api/admin/recordings");
+  return r.ok ? ((await r.json()) as Recording[]) : [];
+}

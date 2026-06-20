@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use sqlx::SqlitePool;
@@ -34,4 +35,7 @@ pub struct AppState {
     pub limits: Arc<Limits>,
     /// Set Secure on auth cookies (enable behind TLS).
     pub secure_cookies: bool,
+    /// Where call recordings (`<call_id>.<participant_id>.ogg`) live on disk;
+    /// the admin recordings page lists + streams from here.
+    pub recordings_dir: PathBuf,
 }

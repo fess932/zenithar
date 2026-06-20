@@ -85,6 +85,10 @@ const ru = {
   noIntegrations: "Интеграций пока нет.",
   freshToken: "API-токен (показывается один раз)",
   apiToken: "API-токен",
+  recordings: "Записи звонков",
+  noRecordings: "Записей пока нет.",
+  commonRoom: "Общая",
+  startedBy: "Инициатор",
   lastUsed: "Использован",
   neverUsed: "не использовался",
 } as const;
@@ -167,6 +171,10 @@ const en: Record<keyof typeof ru, string> = {
   noIntegrations: "No integrations yet.",
   freshToken: "API token (shown once)",
   apiToken: "API token",
+  recordings: "Call recordings",
+  noRecordings: "No recordings yet.",
+  commonRoom: "Common",
+  startedBy: "Started by",
   lastUsed: "Last used",
   neverUsed: "never used",
 };

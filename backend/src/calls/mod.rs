@@ -193,6 +193,7 @@ impl CallRegistry {
 
     /// Start (or join) the call in `room_id`. Builds the participant's server
     /// PeerConnection, returns the SDP offer to send them, and rings the room.
+    #[tracing::instrument(skip_all, fields(room = %room_id, participant = %principal_id))]
     pub async fn join(
         self: &Arc<Self>,
         room_id: &str,
@@ -414,6 +415,7 @@ struct Driver {
 }
 
 impl Driver {
+    #[tracing::instrument(skip_all, fields(call = %self.call.id, participant = %self.my_id))]
     async fn run(mut self) {
         let mut buf = vec![0u8; MAX_DATAGRAM];
         'drive: loop {

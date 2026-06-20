@@ -401,6 +401,46 @@ pub async fn set_call_recording(
     Ok(())
 }
 
+/// A finished call that has a recording, for the admin recordings page. Per-track
+/// files are discovered on disk; this is just the call-level metadata.
+#[derive(Clone, Debug, serde::Serialize, sqlx::FromRow)]
+pub struct RecordedCall {
+    pub call_id: String,
+    /// Client room title (the client's name); `None` for the common room.
+    pub room_title: Option<String>,
+    pub started_by_name: Option<String>,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+}
+
+/// Recorded calls, newest first, with room + caller names resolved.
+pub async fn list_recorded_calls(reads: &SqlitePool) -> sqlx::Result<Vec<RecordedCall>> {
+    sqlx::query_as::<_, RecordedCall>(
+        "SELECT c.id AS call_id,
+                rp.display_name AS room_title,
+                sb.display_name AS started_by_name,
+                c.started_at, c.ended_at
+         FROM calls c
+         JOIN rooms r ON r.id = c.room_id
+         LEFT JOIN principals rp ON rp.id = r.client_id
+         LEFT JOIN principals sb ON sb.id = c.started_by
+         WHERE c.recording_id IS NOT NULL
+         ORDER BY c.started_at DESC",
+    )
+    .fetch_all(reads)
+    .await
+}
+
+/// Map of principal id → display name (for labeling recording tracks by speaker).
+pub async fn all_principal_names(
+    reads: &SqlitePool,
+) -> sqlx::Result<std::collections::HashMap<String, String>> {
+    let rows: Vec<(String, String)> = sqlx::query_as("SELECT id, display_name FROM principals")
+        .fetch_all(reads)
+        .await?;
+    Ok(rows.into_iter().collect())
+}
+
 /// Rooms an employee can see: common first, then each client room (titled with
 /// the client's display name), oldest client first.
 pub async fn list_rooms_for_user(reads: &SqlitePool) -> sqlx::Result<Vec<RoomSummary>> {
