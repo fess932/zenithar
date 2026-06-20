@@ -43,6 +43,7 @@ use webrtc::track::track_remote::TrackRemote;
 use crate::models::{CallParticipant, Outbound, Signal};
 use recorder::Recorder;
 
+mod peer;
 mod recorder;
 
 /// One person's leg of a call: their server-side PeerConnection plus the local

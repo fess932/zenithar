@@ -24,8 +24,23 @@ async function buildJs(): Promise<void> {
 const buildCss = () => $`bun run css`.quiet();
 const copyHtml = () => Bun.write("dist/index.html", Bun.file("src/index.html"));
 
+// Static assets (icons, manifest) copied verbatim into dist/assets/ — served by
+// the backend's rust-embed at /assets/*.
+const ASSETS = [
+  "favicon.svg",
+  "icon.svg",
+  "manifest.webmanifest",
+  "apple-touch-icon.png",
+  "icon-192.png",
+  "icon-512.png",
+];
+const copyStatic = () =>
+  Promise.all(
+    ASSETS.map((f) => Bun.write(`dist/assets/${f}`, Bun.file(`src/assets/${f}`))),
+  );
+
 async function buildAll(): Promise<void> {
-  await Promise.all([buildJs(), buildCss(), copyHtml()]);
+  await Promise.all([buildJs(), buildCss(), copyHtml(), copyStatic()]);
   console.log(`built ${new Date().toLocaleTimeString()}`);
 }
 
