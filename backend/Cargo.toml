@@ -31,7 +31,13 @@ rtc = "0.9"
 bytes = "1.12.0"
 opentelemetry = "0.32.0"
 opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.32.0", features = ["http-proto", "reqwest-client"] }
+# The span batch processor runs on its own (non-Tokio) thread, so the exporter
+# must use a BLOCKING HTTP client — an async (reqwest) one panics there with
+# "there is no reactor running". `reqwest-blocking-client` runs everywhere.
+opentelemetry-otlp = { version = "0.32.0", features = [
+    "http-proto",
+    "reqwest-blocking-client",
+] }
 tracing-opentelemetry = "0.33.0"
 # Only used to reverse-proxy the local GreptimeDB dashboard over plain HTTP/1 —
 # no TLS/http2 (avoids pulling h2), keeping it light.
