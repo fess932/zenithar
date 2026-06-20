@@ -40,6 +40,13 @@ const CONNECT_TIMEOUT_MS = 20000;
 // public IP, so no TURN. A public STUN can be added later if needed.
 const RTC_CONFIG: RTCConfiguration = { iceServers: [] };
 
+// The server (offerer) trickles its ICE candidates immediately after the offer,
+// often BEFORE our getUserMedia resolves and we've built `pc` + set the remote
+// description. Buffer any early candidates and flush them once the PC is ready,
+// otherwise the server's only candidate is silently dropped and ICE fails.
+let pendingIce: RTCIceCandidateInit[] = [];
+let remoteReady = false;
+
 /// Start a call in a room (or accept the one ringing — same handshake: we ask
 /// the server to add us, it answers with an SDP offer).
 export function startCall(roomId: string): void {
@@ -138,15 +145,33 @@ async function onOffer(id: string, sdp: string): Promise<void> {
   };
 
   await pc.setRemoteDescription({ type: "offer", sdp });
+  // Remote description is set — now early-buffered candidates can be applied.
+  remoteReady = true;
+  for (const c of pendingIce) {
+    try {
+      await pc.addIceCandidate(c);
+    } catch {
+      /* ignore a bad/stale candidate */
+    }
+  }
+  pendingIce = [];
+
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
   sendFrame({ type: "call-answer", call_id: id, sdp: answer.sdp });
 }
 
 async function onIce(id: string, candidate: string): Promise<void> {
-  if (!pc || id !== callId) return;
+  if (id !== callId) return;
+  const cand = JSON.parse(candidate) as RTCIceCandidateInit;
+  // Buffer until the PC exists AND the remote description is set; flushing too
+  // early throws ("remote description was null") and loses the candidate.
+  if (!pc || !remoteReady) {
+    pendingIce.push(cand);
+    return;
+  }
   try {
-    await pc.addIceCandidate(JSON.parse(candidate));
+    await pc.addIceCandidate(cand);
   } catch {
     /* candidate arrived before remote description; browser will retry on next */
   }
@@ -162,6 +187,8 @@ function startTimer(): void {
 
 function teardown(): void {
   clearConnectWatchdog();
+  pendingIce = [];
+  remoteReady = false;
   if (timer) clearInterval(timer);
   timer = null;
   localStream?.getTracks().forEach((tr) => tr.stop());
