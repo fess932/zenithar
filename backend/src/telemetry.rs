@@ -73,9 +73,19 @@ fn endpoint() -> Option<String> {
 }
 
 fn build_provider(endpoint: &str) -> anyhow::Result<SdkTracerProvider> {
+    // A programmatic endpoint is used verbatim by the OTLP/HTTP exporter (unlike
+    // the env-var path, it does NOT append the signal path), so we add the
+    // standard `/v1/traces` ourselves. This makes ZENITHAR_OTLP_ENDPOINT a base
+    // URL: a plain collector (`http://host:4318`) and GreptimeDB's OTLP base
+    // (`http://host:4000/v1/otlp`) both work.
+    let url = if endpoint.ends_with("/v1/traces") {
+        endpoint.to_string()
+    } else {
+        format!("{}/v1/traces", endpoint.trim_end_matches('/'))
+    };
     let exporter = SpanExporter::builder()
         .with_http()
-        .with_endpoint(endpoint)
+        .with_endpoint(url)
         .with_timeout(Duration::from_secs(3))
         .build()?;
     let resource = Resource::builder().with_service_name(SERVICE_NAME).build();

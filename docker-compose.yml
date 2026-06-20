@@ -35,4 +35,30 @@ services:
       # Media UDP port RANGE — one socket per participant. Forward this whole
       # range in the router. Avoid ports in use (e.g. WireGuard on 50000/50001).
       ZENITHAR_UDP_PORTS: "51000-51200"
+      # --- Observability (on by default) ---------------------------------------
+      # Export traces (calls, etc.) to the bundled GreptimeDB below. Both services
+      # use host networking, so zenithar reaches it at 127.0.0.1:4000. To turn
+      # telemetry OFF: comment this line (and optionally remove the greptimedb
+      # service). If the endpoint is unreachable, batches are dropped and the app
+      # is unaffected.
+      ZENITHAR_OTLP_ENDPOINT: "http://127.0.0.1:4000/v1/otlp"
+    restart: unless-stopped
+
+  # Metrics/traces store (started by default; remove this service to drop it).
+  # Single Rust-native binary (no Prometheus/Grafana/Loki); ingests OTLP and
+  # serves its own dashboard + SQL on http://<host>:4000/dashboard.
+  # NOTE: host networking + 0.0.0.0 exposes 4000 on every interface and
+  # GreptimeDB has no auth by default — firewall it or bind 127.0.0.1 if this
+  # host is public.
+  greptimedb:
+    image: greptime/greptimedb:1.1.1
+    network_mode: host
+    command:
+      - standalone
+      - start
+      - --http-addr=0.0.0.0:4000
+      - --rpc-bind-addr=0.0.0.0:4001
+      - --data-home=/greptimedb_data
+    volumes:
+      - ./data/greptimedb:/greptimedb_data
     restart: unless-stopped
