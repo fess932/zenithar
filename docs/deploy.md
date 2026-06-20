@@ -69,26 +69,26 @@ Fix: advertise the public IP (NAT 1:1). No STUN/TURN needed.
 > router's public IP from inside needs NAT hairpin, which most routers don't do —
 > so a same-LAN test call will `ICE failed` even when the setup is correct.
 
-### Pin the media UDP port (`ZENITHAR_UDP_PORTS`)
+### Pin the media UDP ports (`ZENITHAR_UDP_PORTS`)
 
-By default each call binds a **random** high UDP port. Pin all media to ONE fixed
-UDP port (muxed, bound `0.0.0.0`) so the router only has to forward a single port,
-and it's directly testable:
+By default each call leg binds a **random** high UDP port. Pin them to a fixed
+**range** (one socket per participant, each bound `0.0.0.0`) so the router only
+has to forward that range, and it's directly testable:
 
 ```yaml
     environment:
       ZENITHAR_PUBLIC_IP: "203.0.113.7"
-      ZENITHAR_UDP_PORTS: "51000"   # one port for all calls; avoid ports in use (e.g. WireGuard)
+      ZENITHAR_UDP_PORTS: "51000-51200"   # range (>=2 ports for a 1:1 call); avoid ports in use (e.g. WireGuard)
 ```
 
-Then forward **UDP 51000** to the server in the router, and verify it's actually
-reachable from outside (the usual culprit when calls still fail with the public
-candidate present but `sendto … / timed out` on the client). Watch packets arrive
-on the server (passive — no listener binding to get wrong):
+Then forward **UDP 51000–51200** to the server in the router, and verify it's
+actually reachable from outside (the usual culprit when calls still fail with the
+public candidate present but `sendto … / timed out` on the client). Watch packets
+arrive on the server (passive — no listener binding to get wrong):
 
 ```sh
 # on the server host (not the distroless container):
-sudo tcpdump -ni any udp port 51000
+sudo tcpdump -ni any udp portrange 51000-51200
 # from an external machine (mobile/other network), send a packet:
 echo test | nc -u -w1 <public-ip> 51000
 ```
@@ -146,13 +146,14 @@ Or, more surgically, stop advertising that global-scope ULA on the bridge.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ZENITHAR_BIND` | `127.0.0.1:3000` (image: `0.0.0.0:3000`) | Listen address. |
+| `ZENITHAR_BIND` | `127.0.0.1:3000` (image: `0.0.0.0:3000`) | Listen address (`host:port`). |
+| `ZENITHAR_PORT` | — | Overrides just the HTTP/WS port (host networking has no `ports:` mapping). |
 | `ZENITHAR_DB` | `data/zenithar.db` (image: `/data/zenithar.db`) | SQLite path; its parent dir is the data dir. |
 | `ZENITHAR_ATTACHMENTS` | `<data>/attachments` | Uploaded files on disk. |
 | `ZENITHAR_RECORDINGS` | `<data>/recordings` | Server-side call recordings (`<call_id>.<participant_id>.ogg`). |
 | `ZENITHAR_STUN` | — | Comma-separated STUN URLs for ICE. Empty = host candidates (LAN/localhost). |
 | `ZENITHAR_PUBLIC_IP` | — | Public IP(s) to advertise as host candidates (NAT 1:1). Set on a server behind NAT/DMZ so remote browsers can reach the media path. |
-| `ZENITHAR_UDP_PORTS` | — | Single media UDP port (muxed, bound `0.0.0.0`), e.g. `51000`. Forward just this port in the router. Empty = random ephemeral port. |
+| `ZENITHAR_UDP_PORTS` | — | Media UDP port range (one socket per participant, bound `0.0.0.0`), e.g. `51000-51200`. Forward the whole range in the router. Empty = ephemeral. |
 | `ZENITHAR_SECURE_COOKIES` | `0` | `1`/`true` to mark the auth cookie `Secure` (behind TLS). |
 | `RUST_LOG` | `info` | Log filter (`tracing` env-filter syntax). |
 

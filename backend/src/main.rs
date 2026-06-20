@@ -75,10 +75,25 @@ pub fn now_millis() -> i64 {
 /// Self-contained liveness probe: `zenithar-backend healthcheck` exits 0 when the
 /// HTTP server answers `/api/health` with 200, else 1. This lets the shell-less
 /// distroless image carry a Docker HEALTHCHECK without bundling curl/wget — the
+/// The HTTP/WebSocket listen address. `ZENITHAR_BIND` sets the full `host:port`
+/// (default `127.0.0.1:3000`; the image sets `0.0.0.0:3000`). `ZENITHAR_PORT` is a
+/// convenience that overrides just the port — handy under host networking, where
+/// the compose `ports:` mapping doesn't apply so the port can't be remapped there.
+fn bind_addr() -> String {
+    let bind = std::env::var("ZENITHAR_BIND").unwrap_or_else(|_| "127.0.0.1:3000".to_string());
+    match std::env::var("ZENITHAR_PORT") {
+        Ok(port) if !port.trim().is_empty() => {
+            let host = bind.rsplit_once(':').map(|(h, _)| h).unwrap_or("0.0.0.0");
+            format!("{host}:{}", port.trim())
+        }
+        _ => bind,
+    }
+}
+
 /// one binary checks itself over loopback.
 fn run_healthcheck() -> i32 {
     use std::io::{Read, Write};
-    let bind = std::env::var("ZENITHAR_BIND").unwrap_or_else(|_| "127.0.0.1:3000".to_string());
+    let bind = bind_addr();
     let port = bind.rsplit(':').next().unwrap_or("3000");
     let timeout = std::time::Duration::from_secs(3);
     let Ok(addr) = format!("127.0.0.1:{port}").parse::<std::net::SocketAddr>() else {
@@ -147,7 +162,7 @@ async fn main() -> Result<()> {
         .init();
 
     let db_path = std::env::var("ZENITHAR_DB").unwrap_or_else(|_| "data/zenithar.db".to_string());
-    let bind = std::env::var("ZENITHAR_BIND").unwrap_or_else(|_| "127.0.0.1:3000".to_string());
+    let bind = bind_addr();
     let secure_cookies = std::env::var("ZENITHAR_SECURE_COOKIES")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);

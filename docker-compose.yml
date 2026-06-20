@@ -3,11 +3,12 @@ services:
     build: .
     image: ghcr.io/fess932/zenithar:latest
     # --- Networking for voice calls --------------------------------------------
-    # Call MEDIA is UDP, muxed over ONE fixed port (ZENITHAR_UDP_PORTS) bound to
-    # 0.0.0.0. With HOST networking that socket is on the host's real NIC, so the
-    # router/DMZ just needs to forward that single UDP port to this host. (Bridged
-    # alternative: drop `network_mode: host` and publish it: add a `ports:` block
-    # with "3000:3000" and "<port>:<port>/udp".)
+    # Call MEDIA is UDP: ONE socket per participant, each bound to 0.0.0.0 on a
+    # port from ZENITHAR_UDP_PORTS (so a 1:1 call needs >=2 ports — use a RANGE).
+    # With HOST networking those sockets are on the host's real NIC, so the
+    # router/DMZ just forwards that whole UDP range to this host. (Bridged
+    # alternative: drop `network_mode: host` and publish the range: add a `ports:`
+    # block with "3000:3000" and "51000-51200:51000-51200/udp".)
     network_mode: host
     volumes:
       # Local ./data holds the SQLite DB, attachments, call recordings, and the
@@ -23,12 +24,15 @@ services:
       retries: 3
     environment:
       RUST_LOG: info
+      # HTTP/WebSocket port. Under host networking the `ports:` mapping doesn't
+      # apply, so set the port here (ZENITHAR_BIND sets the full host:port).
+      ZENITHAR_PORT: "3000"
       # Behind TLS (reverse proxy), mark auth cookies Secure:
       # ZENITHAR_SECURE_COOKIES: "1"
       # STUN for WebRTC ICE (comma-separated). Empty works on a LAN/localhost.
       ZENITHAR_STUN: ""
       ZENITHAR_PUBLIC_IP: "<external ip>"
-      # Single media UDP port (mux), forwarded in the router. Avoid ports already
-      # in use (e.g. WireGuard on 50000/50001).
-      ZENITHAR_UDP_PORTS: "51000"
+      # Media UDP port RANGE — one socket per participant. Forward this whole
+      # range in the router. Avoid ports in use (e.g. WireGuard on 50000/50001).
+      ZENITHAR_UDP_PORTS: "51000-51200"
     restart: unless-stopped
