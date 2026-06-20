@@ -260,7 +260,6 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .route("/ws", any(ws::ws_handler))
-        .route("/api/health", get(|| async { "ok" }))
         .route("/i/{token}", get(routes::enter_link))
         .route("/api/me", get(routes::me))
         .route("/api/ice", get(routes::ice_servers))
@@ -292,14 +291,8 @@ async fn main() -> Result<()> {
             "/api/integrations/{id}/revoke",
             post(routes::revoke_integration),
         )
-        // Admin: telemetry dashboard (reverse-proxied to GreptimeDB, cookie-gated)
-        // + link info + saved call recordings. We mirror GreptimeDB's own paths
-        // (/dashboard*, /v1/*) so the SPA's relative assets + API calls resolve.
+        // Admin: telemetry dashboard link + saved call recordings.
         .route("/api/admin/telemetry", get(routes::telemetry_info))
-        .route("/dashboard", any(dashproxy::proxy))
-        .route("/dashboard/", any(dashproxy::proxy))
-        .route("/dashboard/{*path}", any(dashproxy::proxy))
-        .route("/v1/{*path}", any(dashproxy::proxy))
         .route("/api/admin/recordings", get(recordings::list))
         .route(
             "/api/admin/recordings/{call_id}/{participant_id}",
@@ -330,6 +323,15 @@ async fn main() -> Result<()> {
                 tower_http::trace::DefaultMakeSpan::new().level(tracing::Level::INFO),
             ),
         )
+        // Added AFTER the trace layer so they're NOT traced (avoid telemetry
+        // noise): the loopback health probe, and the GreptimeDB dashboard
+        // reverse-proxy — whose own /dashboard*,/v1/* traffic would otherwise echo
+        // back as traces. Mirrors GreptimeDB's native paths so the SPA resolves.
+        .route("/api/health", get(|| async { "ok" }))
+        .route("/dashboard", any(dashproxy::proxy))
+        .route("/dashboard/", any(dashproxy::proxy))
+        .route("/dashboard/{*path}", any(dashproxy::proxy))
+        .route("/v1/{*path}", any(dashproxy::proxy))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
