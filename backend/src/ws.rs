@@ -77,6 +77,11 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
     // Per-socket message rate limit: burst 10, ~1/s sustained.
     let mut msg_bucket = LocalBucket::new(10.0, 1.0);
 
+    // Periodic WS ping to measure round-trip latency (the connections list shows
+    // it). The browser auto-replies with a pong echoing our timestamp payload.
+    let mut ping_iv = tokio::time::interval(std::time::Duration::from_secs(25));
+    ping_iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
     loop {
         tokio::select! {
             biased;
@@ -88,6 +93,16 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                 state.presence.touch(&principal.id);
                 let text = match msg {
                     Message::Text(t) => t,
+                    Message::Pong(payload) => {
+                        // Pong echoes our ping's timestamp → round-trip = now - ts.
+                        if payload.len() >= 8 {
+                            let ts = i64::from_le_bytes(payload[..8].try_into().unwrap());
+                            state
+                                .presence
+                                .set_ping(&principal.id, (crate::now_millis() - ts).max(0));
+                        }
+                        continue;
+                    }
                     Message::Close(_) => break,
                     _ => continue,
                 };
@@ -207,6 +222,15 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                     Inbound::CallLeave { call_id } => {
                         state.calls.leave(&call_id, &principal.id).await;
                     }
+                }
+            }
+
+            // Periodic latency probe: send a ping carrying the current time; the
+            // pong (handled above) yields the round-trip.
+            _ = ping_iv.tick() => {
+                let payload = crate::now_millis().to_le_bytes().to_vec();
+                if sender.send(Message::Ping(payload.into())).await.is_err() {
+                    break;
                 }
             }
 

@@ -350,6 +350,8 @@ pub struct Person {
     /// Unix millis of last activity (last received frame); `None` if never seen
     /// since the server started.
     last_seen: Option<i64>,
+    /// Last WS ping round-trip in ms (only while online).
+    ping_ms: Option<i64>,
 }
 
 /// `GET /api/people` — the connections list: every human principal with live
@@ -363,14 +365,21 @@ pub async fn people(State(state): State<AppState>, Identity(p): Identity) -> Res
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let last_seen = state.presence.last_seen_map();
+    let pings = state.presence.ping_map();
     let people: Vec<Person> = roster
         .into_iter()
         .map(|(id, name, kind)| {
             let online = state.presence.is_online(&id);
             let last = last_seen.get(&id).copied();
+            let ping_ms = if online {
+                pings.get(&id).copied()
+            } else {
+                None
+            };
             Person {
                 online,
                 last_seen: last,
+                ping_ms,
                 id,
                 name,
                 kind,

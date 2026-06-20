@@ -33,7 +33,7 @@
   });
 
   function ago(p: Person): string {
-    if (isOnline(p)) return $t("onlineNow");
+    if (isOnline(p)) return p.ping_ms != null ? `${p.ping_ms} ms` : $t("onlineNow");
     if (p.last_seen == null) return "—";
     const s = Math.max(0, (Date.now() - p.last_seen) / 1000);
     if (s < 60) return $t("justNow");

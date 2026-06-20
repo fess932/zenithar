@@ -159,6 +159,7 @@ export interface Person {
   kind: string;
   online: boolean;
   last_seen: number | null; // unix millis of last activity
+  ping_ms: number | null; // last WS round-trip (online only)
 }
 
 export async function listPeople(): Promise<Person[]> {

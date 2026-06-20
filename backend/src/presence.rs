@@ -16,6 +16,8 @@ pub struct PresenceRegistry {
     // principal_id -> unix millis of last activity (kept after they go offline,
     // so the connections list can show when they were last seen).
     last_seen: Mutex<HashMap<String, i64>>,
+    // principal_id -> last measured WS ping round-trip (ms), while online.
+    ping: Mutex<HashMap<String, i64>>,
     tx: broadcast::Sender<Outbound>,
 }
 
@@ -25,8 +27,19 @@ impl PresenceRegistry {
         Self {
             online: Mutex::new(HashMap::new()),
             last_seen: Mutex::new(HashMap::new()),
+            ping: Mutex::new(HashMap::new()),
             tx,
         }
+    }
+
+    /// Record a measured WS ping/pong round-trip (ms) for a principal.
+    pub fn set_ping(&self, id: &str, ms: i64) {
+        self.ping.lock().unwrap().insert(id.to_string(), ms);
+    }
+
+    /// Snapshot of `principal_id -> last ping ms`.
+    pub fn ping_map(&self) -> HashMap<String, i64> {
+        self.ping.lock().unwrap().clone()
     }
 
     /// Record activity (a received frame) so we know when this principal was last
@@ -89,6 +102,7 @@ impl PresenceRegistry {
             }
         };
         if let Some(kind) = gone {
+            self.ping.lock().unwrap().remove(id); // ping is only meaningful online
             let _ = self.tx.send(Outbound::Presence {
                 id: id.to_string(),
                 kind,
