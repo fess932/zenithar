@@ -113,6 +113,7 @@ impl CallRegistry {
         stun: Vec<String>,
         public_ips: Vec<String>,
         udp_ports: Option<(u16, u16)>,
+        media_ip: Option<String>,
         signal: broadcast::Sender<Signal>,
         db: sqlx::SqlitePool,
         recordings_dir: PathBuf,
@@ -145,6 +146,13 @@ impl CallRegistry {
                 Ok(eph) => setting.set_udp_network(UDPNetwork::Ephemeral(eph)),
                 Err(e) => warn!(error = %e, lo, hi, "invalid ZENITHAR_UDP_PORTS range; ignoring"),
             }
+        }
+        // On a multi-homed host (e.g. host networking with podman bridges
+        // alongside the real LAN NIC), ICE otherwise binds media sockets on the
+        // WRONG interface (a 192.168.x bridge), so forwarded UDP arriving on the
+        // real interface never reaches the socket. Pin gathering to one IP.
+        if let Some(ip) = media_ip {
+            setting.set_ip_filter(Box::new(move |cand_ip| cand_ip.to_string() == ip));
         }
 
         let api = APIBuilder::new()

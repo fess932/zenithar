@@ -3,21 +3,13 @@ services:
     build: .
     image: ghcr.io/fess932/zenithar:latest
     # --- Networking for voice calls --------------------------------------------
-    # Call MEDIA is UDP. In bridged mode the container gathers its podman-bridge
-    # IP (192.168.x), not the host's, so forwarded UDP never reaches the app.
-    # Pick ONE:
-    #
-    # (A) Host networking — simplest & most reliable for WebRTC (no UDP source-
-    #     port mangling). Comment out `ports:` below and use:
-    #   network_mode: host
-    #
-    # (B) Keep bridged but publish the PINNED UDP range (needs ZENITHAR_UDP_PORTS
-    #     set to the same range). Replace `ports:` with:
-    #   ports:
-    #     - "3000:3000"
-    #     - "51000-51200:51000-51200/udp"
-    # ports:
-    #   - "3000:3000" # HTTP + WebSocket (chat & call signaling)
+    # Call MEDIA is UDP. Use HOST networking (below) so the app binds the host's
+    # real NIC directly. On a multi-homed host (extra podman bridges, WireGuard)
+    # ICE would bind media on the wrong interface, so ALSO set ZENITHAR_MEDIA_IP
+    # to the LAN IP the router/DMZ forwards to, and ZENITHAR_UDP_PORTS to a fixed
+    # range you forward. (Bridged alternative: drop `network_mode: host`, add a
+    # `ports:` block publishing "3000:3000" and "<range>:<range>/udp".)
+    network_mode: host
     volumes:
       # Local ./data holds the SQLite DB, attachments, call recordings, and the
       # bootstrap admin link. The container runs as root, so it can write here
@@ -38,11 +30,9 @@ services:
       ZENITHAR_STUN: ""
       ZENITHAR_PUBLIC_IP: "<external ip>"
       # Fixed media UDP range — forward exactly this in the router (avoid ports
-      # already in use, e.g. WireGuard on 50000/50001). Must match option (B)'s
-      # published range if bridged.
+      # already in use, e.g. WireGuard on 50000/50001).
       ZENITHAR_UDP_PORTS: "51000-51200"
+      # Multi-homed host: bind media on this LAN IP (the one the DMZ forwards to),
+      # not a podman bridge. Match it to your real NIC, e.g. 10.51.0.10.
+      ZENITHAR_MEDIA_IP: "<lan ip>"
     restart: unless-stopped
-    # See the "Networking for voice calls" note at the top: pick host networking
-    # (A) or publish the pinned UDP range (B). Bridged without one of these = no
-    # call audio (the container only sees its 192.168.x bridge IP).
-    network_mode: host

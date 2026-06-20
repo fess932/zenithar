@@ -153,6 +153,7 @@ Or, more surgically, stop advertising that global-scope ULA on the bridge.
 | `ZENITHAR_STUN` | — | Comma-separated STUN URLs for ICE. Empty = host candidates (LAN/localhost). |
 | `ZENITHAR_PUBLIC_IP` | — | Public IP(s) to advertise as host candidates (NAT 1:1). Set on a server behind NAT/DMZ so remote browsers can reach the media path. |
 | `ZENITHAR_UDP_PORTS` | — | Fixed media UDP port range, e.g. `51000-51200`. Forward exactly this range in the router. Empty = random ephemeral ports. |
+| `ZENITHAR_MEDIA_IP` | — | On a multi-homed host (host networking + extra bridges/VPN), the LAN IP to bind call media on (the one the DMZ forwards to, e.g. `10.51.0.10`). Empty = gather on all interfaces. |
 | `ZENITHAR_SECURE_COOKIES` | `0` | `1`/`true` to mark the auth cookie `Secure` (behind TLS). |
 | `RUST_LOG` | `info` | Log filter (`tracing` env-filter syntax). |
 
