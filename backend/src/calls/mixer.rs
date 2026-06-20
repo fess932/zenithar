@@ -26,14 +26,25 @@ const RATE: usize = 48_000; // matches Opus internal rate (no resample)
 const FRAME: usize = 960; // 20 ms @ 48 kHz, per channel — one Opus frame
 const MAX_FRAME: usize = 5_760; // 120 ms @ 48 kHz, per channel — largest frame
 const DEFAULT_BITRATE: i32 = 64_000; // voice: ~transparent, tiny files
+const MAX_OFFSET: u32 = (RATE as u32) * 3600; // 1 h — guard against reorder/wrap
+
+/// Per-participant decode + timeline anchor.
+struct Stream {
+    dec: Decoder,
+    /// RTP timestamp of this stream's first packet (its media-clock zero).
+    first_ts: u32,
+    /// Sample index where that first packet sits on the shared timeline (set from
+    /// wall-clock arrival, so two speakers line up); later packets are offset from
+    /// here by their RTP timestamp delta — smooth and gap-correct, not jittery.
+    base_pos: usize,
+}
 
 struct Inner {
     start: Instant,
     /// Interleaved stereo accumulator (L, R, L, R…); i32 so summed speakers can't
     /// clip before the final clamp.
     buf: Vec<i32>,
-    /// One stereo Opus decoder per participant (decoder state is per-stream).
-    decoders: HashMap<String, Decoder>,
+    streams: HashMap<String, Stream>,
 }
 
 /// Per-call live mixer.
@@ -51,30 +62,42 @@ impl Mixer {
             inner: Mutex::new(Inner {
                 start: Instant::now(),
                 buf: Vec::new(),
-                decoders: HashMap::new(),
+                streams: HashMap::new(),
             }),
         }
     }
 
     /// Decode one participant's Opus packet (as stereo) and sum it into the call
-    /// timeline at its real (wall-clock) arrival position.
-    pub fn add(&self, participant: &str, opus: &[u8]) {
+    /// timeline by its RTP timestamp (media clock) — so frames stay gapless and
+    /// don't overlap despite network jitter, and DTX silence stays silent.
+    pub fn add(&self, participant: &str, rtp_ts: u32, opus: &[u8]) {
         if opus.is_empty() {
             return;
         }
         let mut guard = self.inner.lock().unwrap();
         let inner = &mut *guard;
-        let pos = inner.start.elapsed().as_millis() as usize * RATE / 1000;
+        let elapsed = inner.start.elapsed().as_millis() as usize * RATE / 1000;
 
-        let dec = inner
-            .decoders
+        let stream = inner
+            .streams
             .entry(participant.to_string())
-            .or_insert_with(|| {
-                Decoder::new(SampleRate::Hz48000, Channels::Stereo).expect("opus stereo decoder")
+            .or_insert_with(|| Stream {
+                dec: Decoder::new(SampleRate::Hz48000, Channels::Stereo)
+                    .expect("opus stereo decoder"),
+                first_ts: rtp_ts,
+                base_pos: elapsed,
             });
+        // Position from the RTP media clock (48 kHz). Reordering/wrap → huge
+        // delta: skip rather than blow up the buffer.
+        let delta = rtp_ts.wrapping_sub(stream.first_ts);
+        if delta > MAX_OFFSET {
+            return;
+        }
+        let pos = stream.base_pos + delta as usize;
+
         // Interleaved L/R out; decode returns samples PER CHANNEL.
         let mut out = [0i16; MAX_FRAME * 2];
-        let n = match dec.decode(Some(opus), &mut out[..], false) {
+        let n = match stream.dec.decode(Some(opus), &mut out[..], false) {
             Ok(n) => n,
             Err(e) => {
                 debug!(error = %e, "mix opus decode failed");
@@ -175,9 +198,10 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
 
         let mix = Mixer::new(dir.clone(), "call01");
-        for _ in 0..5 {
-            mix.add("alice", opus);
-            mix.add("bob", opus);
+        // Advancing RTP timestamps (+960 = 20 ms per frame), as a real stream has.
+        for k in 0..5u32 {
+            mix.add("alice", k * 960, opus);
+            mix.add("bob", k * 960, opus);
         }
         assert!(mix.finalize(), "should write a mix file");
 

@@ -165,6 +165,55 @@ function stopMeter(): void {
   callLevels.set({ local: 0, remote: 0 });
 }
 
+// ---- incoming-call ringtone -------------------------------------------------
+// A synthesized "ring-ring" repeated on a loop while a call is ringing, so an
+// incoming call is audible, not just a toast. Web Audio (no asset, offline-ok);
+// reuses the meter's AudioContext. Autoplay policy may keep it silent until the
+// page has had a user gesture — the visual ring still shows.
+let ringTimer: ReturnType<typeof setInterval> | null = null;
+let ringStopAt = 0;
+
+function ringBurst(): void {
+  const ctx = meterCtx();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  // Two short two-tone chirps = one "ring-ring".
+  const chirp = (at: number): void => {
+    for (const freq of [480, 620]) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, now + at);
+      gain.gain.exponentialRampToValueAtTime(0.12, now + at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + at + 0.4);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + at);
+      osc.stop(now + at + 0.42);
+    }
+  };
+  chirp(0);
+  chirp(0.55);
+}
+
+function startRing(): void {
+  if (ringTimer !== null) return;
+  ringStopAt = Date.now() + 45_000; // safety cap if signaling never resolves
+  ringBurst();
+  ringTimer = setInterval(() => {
+    if (Date.now() > ringStopAt) {
+      stopRing();
+      return;
+    }
+    ringBurst();
+  }, 2500);
+}
+
+function stopRing(): void {
+  if (ringTimer !== null) clearInterval(ringTimer);
+  ringTimer = null;
+}
+
 // The server (offerer) trickles its ICE candidates immediately after the offer,
 // often BEFORE our getUserMedia resolves and we've built `pc` + set the remote
 // description. Buffer any early candidates and flush them once the PC is ready,
@@ -209,12 +258,14 @@ function clearConnectWatchdog(): void {
 export function acceptCall(): void {
   const inc = get(incoming);
   if (!inc) return;
+  stopRing();
   joinRoom(inc.roomId);
   startCall(inc.roomId);
 }
 
 /// Decline a ringing call (just dismiss; we never joined).
 export function declineCall(): void {
+  stopRing();
   incoming.set(null);
   callState.set("idle");
 }
@@ -325,6 +376,7 @@ function startTimer(): void {
 function teardown(): void {
   clearConnectWatchdog();
   stopMeter();
+  stopRing();
   pendingIce = [];
   remoteReady = false;
   if (timer) clearInterval(timer);
@@ -364,6 +416,7 @@ export function initCallSignaling(): void {
           fromName: f.from_name as string,
         });
         callState.set("ringing");
+        startRing(); // audible ringtone, not just the toast
         break;
       }
       case "call-offer":

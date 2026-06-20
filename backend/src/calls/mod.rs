@@ -478,7 +478,9 @@ impl Driver {
                         );
                     }
                     self.call.recorder.write(&self.my_id, &pkt);
-                    self.call.mixer.add(&self.my_id, &pkt.payload);
+                    self.call
+                        .mixer
+                        .add(&self.my_id, pkt.header.timestamp, &pkt.payload);
                     let pkt = Arc::new(pkt);
                     for tx in others {
                         let _ = tx.send(Cmd::Forward(pkt.clone()));

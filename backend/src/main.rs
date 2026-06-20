@@ -160,7 +160,8 @@ async fn main() -> Result<()> {
     }
 
     // Console logs always; OTLP trace export only if ZENITHAR_OTLP_ENDPOINT is set.
-    let otel = telemetry::init();
+    // The provider lives for the whole process (never shut down) — see telemetry.
+    telemetry::init();
 
     let db_path = std::env::var("ZENITHAR_DB").unwrap_or_else(|_| "data/zenithar.db".to_string());
     let bind = bind_addr();
@@ -326,6 +327,5 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     info!(%db_path, "zenithar backend listening on http://{bind}");
     axum::serve(listener, app).await?;
-    telemetry::shutdown(otel); // flush buffered spans on a clean exit
     Ok(())
 }

@@ -11,6 +11,7 @@
 //! drops batches — it never blocks a request or crashes the process. With no
 //! endpoint configured there is zero overhead and no dependency on any collector.
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use opentelemetry::global;
@@ -23,46 +24,48 @@ use tracing_subscriber::EnvFilter;
 
 const SERVICE_NAME: &str = "zenithar-backend";
 
-/// Install the global subscriber. Returns the tracer provider when OTLP export is
-/// on, so `main` can flush it on shutdown; `None` means console-only logging.
-pub fn init() -> Option<SdkTracerProvider> {
+/// Holds a strong `'static` reference to the provider for the whole process, so
+/// it is NEVER dropped (and never shut down). The batch processor then exports
+/// for the entire process lifetime; the OS reclaims it on exit. Shutting it down
+/// early is exactly what produced "Spans emitted after Shutdown" — and dropped
+/// every later span — so we deliberately don't.
+static PROVIDER: OnceLock<SdkTracerProvider> = OnceLock::new();
+
+/// Install the global subscriber. Console logging always; OTLP trace export too
+/// when `ZENITHAR_OTLP_ENDPOINT` is set.
+pub fn init() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
     let fmt_layer = tracing_subscriber::fmt::layer();
 
-    let (otel_layer, provider) = match endpoint() {
+    let otel_layer = match endpoint() {
         Some(ep) => match build_provider(&ep) {
             Ok(provider) => {
-                global::set_tracer_provider(provider.clone());
-                let layer = tracing_opentelemetry::layer().with_tracer(provider.tracer("zenithar"));
-                (Some(layer), Some(provider))
+                // Keep it alive forever (see PROVIDER); don't return it / shut it down.
+                let _ = PROVIDER.set(provider.clone());
+                let tracer = provider.tracer("zenithar");
+                global::set_tracer_provider(provider);
+                Some(tracing_opentelemetry::layer().with_tracer(tracer))
             }
             // Telemetry must never fail startup — fall back to console logging.
             Err(e) => {
                 eprintln!("zenithar: OTLP export disabled (build failed): {e}");
-                (None, None)
+                None
             }
         },
-        None => (None, None),
+        None => None,
     };
 
     // `Option<Layer>` is a no-op Layer when `None`, so the same registry covers
     // both the console-only and console+OTLP cases.
+    let enabled = otel_layer.is_some();
     tracing_subscriber::registry()
         .with(filter)
         .with(fmt_layer)
         .with(otel_layer)
         .init();
 
-    if provider.is_some() {
+    if enabled {
         tracing::info!(endpoint = %endpoint().unwrap_or_default(), "OTLP trace export enabled");
-    }
-    provider
-}
-
-/// Best-effort flush + shutdown so buffered spans aren't lost on a clean exit.
-pub fn shutdown(provider: Option<SdkTracerProvider>) {
-    if let Some(p) = provider {
-        let _ = p.shutdown();
     }
 }
 
