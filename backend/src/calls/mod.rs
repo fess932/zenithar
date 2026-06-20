@@ -293,6 +293,7 @@ impl CallRegistry {
                 local_addr: adv_addr,
                 pc,
                 sender_id,
+                send_ssrc: ssrc,
                 rx,
                 logged_peer: false,
                 logged_rtp_in: false,
@@ -397,6 +398,10 @@ struct Driver {
     local_addr: SocketAddr,
     pc: RTCPeerConnection,
     sender_id: RTCRtpSenderId,
+    /// SSRC of THIS leg's outbound track. Forwarded packets (which carry the
+    /// *source* participant's SSRC) must be rewritten to this before write_rtp,
+    /// or the browser drops them as belonging to an unknown stream.
+    send_ssrc: u32,
     rx: mpsc::UnboundedReceiver<Cmd>,
     /// One-shot: log the first inbound datagram's source (the client's real,
     /// post-NAT address) so a deploy can confirm checks are arriving + from where.
@@ -515,7 +520,11 @@ impl Driver {
                                     self.logged_rtp_out = true;
                                     info!(participant = %self.my_id, "first RTP out (writing audio toward this participant)");
                                 }
-                                let _ = sender.write_rtp((*pkt).clone());
+                                // Re-stamp the source's SSRC with this leg's track
+                                // SSRC so the browser accepts it as its stream.
+                                let mut p = (*pkt).clone();
+                                p.header.ssrc = self.send_ssrc;
+                                let _ = sender.write_rtp(p);
                             } else if !self.logged_rtp_out {
                                 self.logged_rtp_out = true;
                                 warn!(participant = %self.my_id, "no rtp_sender to forward into — audio won't reach this participant");
