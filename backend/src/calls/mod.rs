@@ -349,36 +349,21 @@ impl CallRegistry {
     }
 
     /// A driver task has exited (left, dropped, or its PC failed). Remove the
-    /// participant; when the call empties, finalize the recording, log the end,
-    /// and tell the room. Idempotent.
+    /// participant. A call needs at least two people, so once it drops below that
+    /// the call is over: tear down any lone remaining leg and tell the room it
+    /// ended — this is what makes a 1:1 hangup end BOTH sides, not just the one
+    /// that left. With 2+ still in, it's a group call: just broadcast the roster.
+    /// Idempotent (a second exit finds the call already gone).
     async fn member_gone(&self, call_id: &str, principal_id: &str) {
         let Some(call) = self.find(call_id) else {
             return;
         };
-        let now_empty = {
+        let remaining: Vec<mpsc::UnboundedSender<Cmd>> = {
             let mut map = call.members.lock().unwrap();
             map.remove(principal_id);
-            map.is_empty()
+            map.values().map(|m| m.tx.clone()).collect()
         };
-        if now_empty {
-            self.calls.lock().unwrap().remove(&call.room_id);
-            let recorded = call.recorder.finalize();
-            if let Err(e) = crate::db::end_call(&self.db, &call.id, crate::now_millis()).await {
-                warn!(error = %e, "failed to log call end");
-            }
-            if recorded {
-                if let Err(e) = crate::db::set_call_recording(&self.db, &call.id, &call.id).await {
-                    warn!(error = %e, "failed to record recording_id");
-                }
-            }
-            call.emit(
-                None,
-                None,
-                Outbound::CallEnded {
-                    call_id: call.id.clone(),
-                },
-            );
-        } else {
+        if remaining.len() >= 2 {
             call.emit(
                 None,
                 None,
@@ -387,7 +372,30 @@ impl CallRegistry {
                     participants: call.roster(),
                 },
             );
+            return;
         }
+
+        // Fewer than two left → end the call.
+        self.calls.lock().unwrap().remove(&call.room_id);
+        for tx in &remaining {
+            let _ = tx.send(Cmd::Close); // close the lone straggler's server leg
+        }
+        let recorded = call.recorder.finalize();
+        if let Err(e) = crate::db::end_call(&self.db, &call.id, crate::now_millis()).await {
+            warn!(error = %e, "failed to log call end");
+        }
+        if recorded {
+            if let Err(e) = crate::db::set_call_recording(&self.db, &call.id, &call.id).await {
+                warn!(error = %e, "failed to record recording_id");
+            }
+        }
+        call.emit(
+            None,
+            None,
+            Outbound::CallEnded {
+                call_id: call.id.clone(),
+            },
+        );
     }
 }
 
