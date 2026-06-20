@@ -6,15 +6,25 @@
     callElapsed,
     callMuted,
     callLevels,
+    callSpeaker,
+    canRouteAudio,
     incoming,
     startCall,
     acceptCall,
     declineCall,
     hangup,
     toggleMute,
+    toggleSpeaker,
   } from "./call";
 
   const pct = (v: number): number => Math.round(Math.min(1, Math.max(0, v)) * 100);
+
+  // Only phones get a loudspeaker toggle: a coarse pointer + a browser that can
+  // actually route output. Desktops use the OS; iOS Safari can't route at all.
+  const showSpeaker =
+    canRouteAudio &&
+    typeof window !== "undefined" &&
+    !!window.matchMedia?.("(pointer: coarse)").matches;
 
   function fmtDur(s: number): string {
     const m = Math.floor(s / 60);
@@ -78,6 +88,18 @@
       </span>
     </div>
 
+    {#if showSpeaker}
+      <button
+        type="button"
+        onclick={toggleSpeaker}
+        aria-label={$t("speaker")}
+        aria-pressed={$callSpeaker}
+        title={$t("speaker")}
+        class="grid size-9 shrink-0 cursor-pointer place-items-center rounded-md border border-line text-base text-muted hover:text-text aria-[pressed=true]:border-beacon aria-[pressed=true]:text-beacon"
+      >
+        {$callSpeaker ? "📢" : "🔈"}
+      </button>
+    {/if}
     <button
       type="button"
       onclick={toggleMute}

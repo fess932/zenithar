@@ -30,6 +30,50 @@ export const incoming = writable<Incoming | null>(null);
 /// mic bar moves but the remote one doesn't, audio isn't returning from the peer.
 export const callLevels = writable<{ local: number; remote: number }>({ local: 0, remote: 0 });
 
+/// Output routing (mostly for phones): true = loudspeaker, false = earpiece.
+export const callSpeaker = writable<boolean>(false);
+/// Whether the browser lets us route call audio at all (HTMLMediaElement.setSinkId).
+/// Chrome/Android: yes; iOS Safari: no (it gives no web control over the route),
+/// so the UI hides the toggle there instead of showing a dead button.
+export const canRouteAudio =
+  typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
+
+type SinkAudio = HTMLAudioElement & { setSinkId(id: string): Promise<void> };
+
+// Pick an output device for the requested route by matching the OS device labels
+// (localized, so we match a few languages); fall back to the system default.
+async function pickOutput(speaker: boolean): Promise<string | null> {
+  try {
+    const outs = (await navigator.mediaDevices.enumerateDevices()).filter(
+      (d) => d.kind === "audiooutput",
+    );
+    if (outs.length === 0) return null;
+    const re = speaker ? /speaker|loud|громк/i : /earpiece|handset|разговор|телефон/i;
+    const hit = outs.find((d) => re.test(d.label));
+    return (hit ?? outs.find((d) => d.deviceId === "default") ?? outs[0]).deviceId;
+  } catch {
+    return null;
+  }
+}
+
+async function applyOutput(speaker: boolean): Promise<void> {
+  if (!remoteAudio || !canRouteAudio) return;
+  const id = await pickOutput(speaker);
+  if (id == null) return;
+  try {
+    await (remoteAudio as SinkAudio).setSinkId(id);
+  } catch {
+    /* device vanished or not permitted — keep the current route */
+  }
+}
+
+/// Toggle loudspeaker ⇄ earpiece for the current call (no-op without setSinkId).
+export function toggleSpeaker(): void {
+  const next = !get(callSpeaker);
+  callSpeaker.set(next);
+  void applyOutput(next);
+}
+
 let pc: RTCPeerConnection | null = null;
 let localStream: MediaStream | null = null;
 let remoteAudio: HTMLAudioElement | null = null;
@@ -216,6 +260,7 @@ async function onOffer(id: string, sdp: string): Promise<void> {
     }
     remoteAudio.srcObject = stream;
     void remoteAudio.play().catch(() => {});
+    void applyOutput(get(callSpeaker)); // honor the chosen route on (re)connect
     // Meter the incoming audio — if this bar stays flat, nothing is coming back.
     remoteAnalyser = analyserFor(stream);
     startMeter();
@@ -296,6 +341,7 @@ function teardown(): void {
   callState.set("idle");
   callParticipants.set([]);
   callMuted.set(false);
+  callSpeaker.set(false);
   callElapsed.set(0);
   incoming.set(null);
 }
