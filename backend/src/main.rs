@@ -198,22 +198,21 @@ async fn main() -> Result<()> {
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .collect();
-    // Single fixed UDP port for all call media (bound 0.0.0.0 via a mux). Forward
-    // just this one UDP port in the NAT/DMZ. Empty = random ephemeral. Accepts a
-    // bare port ("51000") or a range ("51000-51200"), using the first port.
-    let media_port: Option<u16> = std::env::var("ZENITHAR_UDP_PORTS")
+    // Fixed UDP port range for call media (one socket per participant, bound
+    // 0.0.0.0). Forward exactly this range in the NAT/DMZ. Empty = ephemeral.
+    // Accepts a range ("51000-51200") or a bare port ("51000" → 51000-51000).
+    let udp_ports: Option<(u16, u16)> = std::env::var("ZENITHAR_UDP_PORTS")
         .ok()
         .and_then(|v| {
-            v.split(['-', ',']).next().map(str::trim).and_then(|p| p.parse().ok())
+            let v = v.trim();
+            match v.split_once('-') {
+                Some((a, b)) => Some((a.trim().parse().ok()?, b.trim().parse().ok()?)),
+                None => {
+                    let p: u16 = v.parse().ok()?;
+                    Some((p, p))
+                }
+            }
         });
-    // Surface the call/media config at startup so a deploy can confirm the new
-    // binary is live (e.g. that ZENITHAR_UDP_PORTS is actually honored).
-    info!(
-        public_ips = ?public_ips,
-        media_port = ?media_port,
-        stun = ?stun,
-        "call media config"
-    );
     // Call recordings (Phase 5): one Ogg/Opus file per participant, on disk.
     let recordings_dir = std::env::var("ZENITHAR_RECORDINGS")
         .map(std::path::PathBuf::from)
@@ -223,7 +222,7 @@ async fn main() -> Result<()> {
     let calls = Arc::new(calls::CallRegistry::new(
         stun,
         public_ips,
-        media_port,
+        udp_ports,
         signal_tx.clone(),
         write_pool.clone(),
         recordings_dir,

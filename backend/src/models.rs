@@ -127,9 +127,10 @@ pub enum Outbound {
         from_name: String,
     },
     /// SDP offer from the server's PeerConnection (answer with `call-answer`).
+    /// The server's single host ICE candidate rides inside this SDP, so there is
+    /// no separate server→client `call-ice` trickle (the client still trickles
+    /// its own candidates to us via the inbound `call-ice`).
     CallOffer { call_id: String, sdp: String },
-    /// A trickled ICE candidate from the server (JSON of `RTCIceCandidateInit`).
-    CallIce { call_id: String, candidate: String },
     /// Participants currently in the call (join/leave updates).
     CallState {
         call_id: String,

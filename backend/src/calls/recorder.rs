@@ -16,10 +16,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use anyhow::Result;
+use rtc::media::io::ogg_writer::OggWriter;
+use rtc::media::io::Writer;
+use rtc::rtp::packet::Packet;
 use tracing::{debug, warn};
-use webrtc::media::io::ogg_writer::OggWriter;
-use webrtc::media::io::Writer;
-use webrtc::rtp::packet::Packet;
 
 // Opus in WebRTC is always 48 kHz; we tag the Ogg stream as stereo to match the
 // forwarded track (players downmix mono payloads fine).
@@ -94,8 +94,8 @@ impl Recorder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use webrtc::rtp::header::Header;
-    use webrtc::rtp::packet::Packet;
+    use rtc::rtp::header::Header;
+    use rtc::rtp::packet::Packet;
 
     fn opus_pkt(timestamp: u32) -> Packet {
         Packet {

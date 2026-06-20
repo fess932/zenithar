@@ -24,12 +24,9 @@ sha2 = "0.10"
 base64 = "0.22"
 time = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
-# WebRTC voice calls (Phase 4): server is the peer in the media path (ICE/DTLS/
-# SRTP/RTP terminate here), so Phase 5 can record the Opus it already forwards.
-# Migrating the call layer from the async `webrtc` crate to the sans-IO `rtc`
-# crate (we drive the I/O loop ourselves → deterministic unit tests + full socket
-# control for NAT). `webrtc` stays until the new path is proven, then is removed.
-webrtc = "0.17"
+# WebRTC voice calls — sans-IO `rtc` crate. The server is the peer in the media
+# path (ICE/DTLS/SRTP/RTP terminate here); we drive the I/O loop ourselves, which
+# makes the forwarding logic unit-testable and gives full ICE/socket control.
 rtc = "0.9"
 bytes = "1.12.0"
 

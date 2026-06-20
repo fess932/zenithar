@@ -1,92 +1,103 @@
-//! Voice calls — the server is the WebRTC peer in the middle (SFU-lite).
+//! Voice calls on the sans-IO `rtc` crate — the server is the WebRTC peer in the
+//! middle (SFU-lite). Each participant gets a server-side `RTCPeerConnection`
+//! driven on its own UDP socket in a spawned task; that task forwards each
+//! decrypted Opus RTP packet to the other participants in the same call (and taps
+//! the recorder). Signaling rides the same `/ws` frames as before, so the
+//! frontend is unchanged.
 //!
-//! Every browser negotiates exactly **one** `RTCPeerConnection` with the server.
-//! The server terminates DTLS/SRTP, so it holds each participant's decrypted Opus
-//! RTP and simply forwards every packet to the other participants in the same
-//! call. Because the media already passes through here, Phase 5 (server-side
-//! recording) is a tap on the forward loop — not a second media path.
-//!
-//! Topology per call (1:1 today, extends to N without a protocol change):
-//! ```text
-//! browser A ─DTLS/SRTP─▶ RTCPeerConnection A ─┐
-//!                                             ├─ forward RTP ─▶ the other peers
-//! browser B ─DTLS/SRTP─▶ RTCPeerConnection B ─┘   (+ Phase 5: write to .ogg)
-//! ```
+//! Why sans-IO: we own the socket and the poll loop, which (a) makes the
+//! forwarding logic unit-testable in-process (see `peer.rs`) and (b) gives full
+//! ICE control — we advertise our public host candidate explicitly with
+//! `add_local_candidate` and accept the client's trickle with
+//! `add_remote_candidate`, and because we feed `handle_read` the real source
+//! address, peer-reflexive just works. No nat_1to1 / UDP-mux hacks needed.
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
+use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
-use tokio::sync::broadcast;
+use anyhow::Result;
+use bytes::BytesMut;
+use tokio::net::UdpSocket;
+use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
 use ulid::Ulid;
-use webrtc::api::interceptor_registry::register_default_interceptors;
-use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS};
-use webrtc::api::setting_engine::SettingEngine;
-use webrtc::api::{APIBuilder, API};
-use webrtc::ice::udp_mux::{UDPMuxDefault, UDPMuxParams};
-use webrtc::ice::udp_network::UDPNetwork;
-use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
-use webrtc::ice_transport::ice_candidate_type::RTCIceCandidateType;
-use webrtc::ice_transport::ice_server::RTCIceServer;
-use webrtc::interceptor::registry::Registry;
-use webrtc::peer_connection::configuration::RTCConfiguration;
-use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
-use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-use webrtc::peer_connection::RTCPeerConnection;
-use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
-use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
-use webrtc::track::track_local::{TrackLocal, TrackLocalWriter};
-use webrtc::track::track_remote::TrackRemote;
+
+use rtc::peer_connection::configuration::RTCConfigurationBuilder;
+use rtc::peer_connection::event::RTCPeerConnectionEvent;
+use rtc::peer_connection::message::RTCMessage;
+use rtc::peer_connection::sdp::RTCSessionDescription;
+use rtc::peer_connection::state::RTCPeerConnectionState;
+use rtc::peer_connection::transport::{
+    CandidateConfig, CandidateHostConfig, RTCIceCandidate, RTCIceCandidateInit, RTCIceServer,
+};
+use rtc::peer_connection::RTCPeerConnection;
+use rtc::peer_connection::RTCPeerConnectionBuilder;
+use rtc::rtp;
+use rtc::rtp_transceiver::RTCRtpSenderId;
+use rtc::sansio::Protocol;
+use rtc::shared::{TaggedBytesMut, TransportContext, TransportProtocol};
 
 use crate::models::{CallParticipant, Outbound, Signal};
+use peer::{audio_media_engine, opus_track};
 use recorder::Recorder;
 
 mod peer;
 mod recorder;
 
-/// One person's leg of a call: their server-side PeerConnection plus the local
-/// track that carries *the other participants'* audio down to them.
-struct Participant {
-    id: String,
-    name: String,
-    pc: Arc<RTCPeerConnection>,
-    /// Audio we write toward this participant (fed from everyone else's RTP).
-    send_track: Arc<TrackLocalStaticRTP>,
+const MAX_DATAGRAM: usize = 2000;
+/// Cap how long a poll-timeout can sleep so commands/sockets stay responsive.
+const MAX_IDLE: Duration = Duration::from_millis(50);
+
+/// Commands a driver task accepts (from signaling and from peers' RTP).
+enum Cmd {
+    /// The participant's SDP answer to our offer.
+    Answer(String),
+    /// A trickled ICE candidate from the participant (JSON `RTCIceCandidateInit`).
+    RemoteIce(String),
+    /// Audio from another participant to write down to this one.
+    Forward(Arc<rtp::packet::Packet>),
+    /// Tear this leg down.
+    Close,
 }
 
-/// A live call in one room. One per room for now.
+/// How the call sees a participant: identity + a handle to its driver task.
+struct Member {
+    id: String,
+    name: String,
+    tx: mpsc::UnboundedSender<Cmd>,
+}
+
+/// A live call in one room.
 struct Call {
     id: String,
     room_id: String,
     signal: broadcast::Sender<Signal>,
-    participants: Mutex<HashMap<String, Arc<Participant>>>,
-    /// Server-side tap of the forwarded Opus (Phase 5).
+    members: Mutex<HashMap<String, Member>>,
     recorder: Recorder,
 }
 
 impl Call {
-    /// Snapshot of every other participant's send-track (so the per-packet
-    /// forward loop never holds the lock across an `.await`).
-    fn other_send_tracks(&self, except: &str) -> Vec<Arc<TrackLocalStaticRTP>> {
-        self.participants
+    fn other_senders(&self, except: &str) -> Vec<mpsc::UnboundedSender<Cmd>> {
+        self.members
             .lock()
             .unwrap()
             .values()
-            .filter(|p| p.id != except)
-            .map(|p| p.send_track.clone())
+            .filter(|m| m.id != except)
+            .map(|m| m.tx.clone())
             .collect()
     }
 
     fn roster(&self) -> Vec<CallParticipant> {
-        self.participants
+        self.members
             .lock()
             .unwrap()
             .values()
-            .map(|p| CallParticipant {
-                id: p.id.clone(),
-                name: p.name.clone(),
+            .map(|m| CallParticipant {
+                id: m.id.clone(),
+                name: m.name.clone(),
             })
             .collect()
     }
@@ -101,68 +112,37 @@ impl Call {
     }
 }
 
-/// Owns every live call and the shared WebRTC `API` (media engine + interceptors).
+/// Owns every live call and the call media configuration.
 pub struct CallRegistry {
-    api: API,
     stun: Vec<String>,
+    /// Public IP(s) to advertise as our host candidate (NAT/DMZ). First is used.
+    public_ips: Vec<String>,
+    /// Fixed UDP port range to bind media on (forwarded 1:1 in the router). None
+    /// = ephemeral. We allocate one socket per participant from this range.
+    udp_ports: Option<(u16, u16)>,
+    next_port: Mutex<u16>,
     signal: broadcast::Sender<Signal>,
     db: sqlx::SqlitePool,
-    /// Where per-call Ogg/Opus recordings are written.
     recordings_dir: PathBuf,
-    calls: Mutex<HashMap<String, Arc<Call>>>, // keyed by room_id
+    calls: Mutex<HashMap<String, Arc<Call>>>, // by room_id
 }
 
 impl CallRegistry {
     pub fn new(
         stun: Vec<String>,
         public_ips: Vec<String>,
-        media_port: Option<u16>,
+        udp_ports: Option<(u16, u16)>,
         signal: broadcast::Sender<Signal>,
         db: sqlx::SqlitePool,
         recordings_dir: PathBuf,
     ) -> Result<Self> {
-        let mut media = MediaEngine::default();
-        media.register_default_codecs()?;
-        let mut registry = Registry::new();
-        registry = register_default_interceptors(registry, &mut media)?;
-
-        // Behind NAT (typical self-host: cloud 1:1 NAT or a home server / DMZ),
-        // the only addresses the OS sees are private, so a remote browser can't
-        // connect. Advertise the public IP (NAT 1:1) as a host candidate without
-        // depending on STUN (often blocked anyway). This is what an EXTERNAL
-        // caller uses to reach the media path. (A caller on the *same LAN* as the
-        // server can't use it — pinging your own router's public IP from inside
-        // needs NAT hairpin, which most routers don't do — so test calls from a
-        // different network, e.g. mobile data. webrtc-rs 0.17's Srflx mapping mode,
-        // which would also keep the private candidate, doesn't trickle candidates
-        // reliably here, so we use Host.)
-        let mut setting = SettingEngine::default();
-        if !public_ips.is_empty() {
-            setting.set_nat_1to1_ips(public_ips, RTCIceCandidateType::Host);
-        }
-        // All call media over ONE fixed UDP port via a mux, bound to 0.0.0.0 so it
-        // receives on every interface (key on a multi-homed / host-networked box:
-        // forwarded UDP arriving on the real NIC is caught regardless of which
-        // interface ICE would otherwise pick). One port to forward in the DMZ, and
-        // it sidesteps the per-interface ephemeral binding that failed to gather
-        // here. Many PeerConnections demux over this single socket by ufrag.
-        if let Some(port) = media_port {
-            let std_sock = std::net::UdpSocket::bind(("0.0.0.0", port))
-                .with_context(|| format!("bind media UDP 0.0.0.0:{port}"))?;
-            std_sock.set_nonblocking(true)?;
-            let sock = tokio::net::UdpSocket::from_std(std_sock)?;
-            let mux = UDPMuxDefault::new(UDPMuxParams::new(sock));
-            setting.set_udp_network(UDPNetwork::Muxed(mux));
-        }
-
-        let api = APIBuilder::new()
-            .with_media_engine(media)
-            .with_interceptor_registry(registry)
-            .with_setting_engine(setting)
-            .build();
+        info!(?public_ips, ?udp_ports, ?stun, "call media config");
+        let next_port = udp_ports.map(|(lo, _)| lo).unwrap_or(0);
         Ok(Self {
-            api,
             stun,
+            public_ips,
+            udp_ports,
+            next_port: Mutex::new(next_port),
             signal,
             db,
             recordings_dir,
@@ -170,18 +150,35 @@ impl CallRegistry {
         })
     }
 
-    fn ice_config(&self) -> RTCConfiguration {
-        RTCConfiguration {
-            ice_servers: if self.stun.is_empty() {
-                vec![]
-            } else {
-                vec![RTCIceServer {
-                    urls: self.stun.clone(),
-                    ..Default::default()
-                }]
-            },
-            ..Default::default()
+    fn ice_servers(&self) -> Vec<RTCIceServer> {
+        if self.stun.is_empty() {
+            vec![]
+        } else {
+            vec![RTCIceServer {
+                urls: self.stun.clone(),
+                ..Default::default()
+            }]
         }
+    }
+
+    /// Bind a UDP socket on `0.0.0.0` — a port from the configured range (so a DMZ
+    /// can forward exactly that range), else an ephemeral one.
+    async fn bind_media_socket(&self) -> Result<UdpSocket> {
+        let Some((lo, hi)) = self.udp_ports else {
+            return Ok(UdpSocket::bind("0.0.0.0:0").await?);
+        };
+        let start = {
+            let mut p = self.next_port.lock().unwrap();
+            let cur = (*p).clamp(lo, hi);
+            *p = if cur >= hi { lo } else { cur + 1 };
+            cur
+        };
+        for port in (start..=hi).chain(lo..start) {
+            if let Ok(s) = UdpSocket::bind(("0.0.0.0", port)).await {
+                return Ok(s);
+            }
+        }
+        anyhow::bail!("no free UDP port in {lo}-{hi}")
     }
 
     fn find(&self, call_id: &str) -> Option<Arc<Call>> {
@@ -193,16 +190,14 @@ impl CallRegistry {
             .cloned()
     }
 
-    /// Start (or join) the call in `room_id` for this principal. Builds their
-    /// server PeerConnection, returns the SDP offer to send back to them, and
-    /// rings the rest of the room.
+    /// Start (or join) the call in `room_id`. Builds the participant's server
+    /// PeerConnection, returns the SDP offer to send them, and rings the room.
     pub async fn join(
         self: &Arc<Self>,
         room_id: &str,
         principal_id: &str,
         principal_name: &str,
     ) -> Result<(String, String)> {
-        // Get or create the room's call.
         let (call, created) = {
             let mut map = self.calls.lock().unwrap();
             if let Some(c) = map.get(room_id) {
@@ -214,143 +209,77 @@ impl CallRegistry {
                     id,
                     room_id: room_id.to_string(),
                     signal: self.signal.clone(),
-                    participants: Mutex::new(HashMap::new()),
+                    members: Mutex::new(HashMap::new()),
                 });
                 map.insert(room_id.to_string(), call.clone());
                 (call, true)
             }
         };
         if created {
-            if let Err(e) = crate::db::insert_call(
-                &self.db,
-                &call.id,
-                room_id,
-                principal_id,
-                crate::now_millis(),
-            )
-            .await
+            if let Err(e) =
+                crate::db::insert_call(&self.db, &call.id, room_id, principal_id, crate::now_millis())
+                    .await
             {
                 warn!(error = %e, "failed to log call start");
             }
         }
 
-        // Build this participant's PeerConnection.
-        let pc = Arc::new(self.api.new_peer_connection(self.ice_config()).await?);
+        let socket = self.bind_media_socket().await?;
+        let local_addr = socket.local_addr()?;
 
-        // Robustness (Phase 7): if the peer's connection drops (tab closed,
-        // network lost, WS gone) without a clean `call-leave`, tear their leg
-        // down so the call doesn't strand. We ignore `Closed` (that's our own
-        // `leave` calling `pc.close()`), reacting only to network-level loss.
-        {
-            let weak_reg = Arc::downgrade(self);
-            let call_id = call.id.clone();
-            let pid = principal_id.to_string();
-            pc.on_peer_connection_state_change(Box::new(move |s| {
-                let weak_reg = weak_reg.clone();
-                let call_id = call_id.clone();
-                let pid = pid.clone();
-                Box::pin(async move {
-                    if matches!(
-                        s,
-                        RTCPeerConnectionState::Failed | RTCPeerConnectionState::Disconnected
-                    ) {
-                        if let Some(reg) = weak_reg.upgrade() {
-                            reg.leave(&call_id, &pid).await;
-                        }
-                    }
-                })
-            }));
-        }
+        // Build the server-side PeerConnection (we are the offerer; we don't set a
+        // DTLS role so the browser answerer becomes DTLS client and we DTLS server).
+        let mut pc = RTCPeerConnectionBuilder::new()
+            .with_configuration(
+                RTCConfigurationBuilder::new()
+                    .with_ice_servers(self.ice_servers())
+                    .build(),
+            )
+            .with_media_engine(audio_media_engine()?)
+            .build()?;
 
-        // The local track this participant will *receive* (others' audio mixed in).
-        let send_track = Arc::new(TrackLocalStaticRTP::new(
-            RTCRtpCodecCapability {
-                mime_type: MIME_TYPE_OPUS.to_owned(),
-                clock_rate: 48000,
-                channels: 2,
-                ..Default::default()
+        // The track this participant *receives* (everyone else's audio).
+        let ssrc = u32::from_le_bytes(crate::auth::random_bytes::<4>());
+        let sender_id = pc.add_track(opus_track("zenithar", &format!("voice-{principal_id}"), ssrc))?;
+
+        // Advertise our reachable host candidate (public IP in prod, loopback in
+        // dev) on the bound port. It rides in the offer SDP, so the client gets it
+        // without a separate trickle.
+        let adv_ip = self
+            .public_ips
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "127.0.0.1".to_string());
+        pc.add_local_candidate(host_candidate(&adv_ip, local_addr.port())?)?;
+
+        let offer = pc.create_offer(None)?;
+        let offer_sdp = offer.sdp.clone();
+        pc.set_local_description(offer)?;
+
+        // Register the participant and spawn its driver.
+        let (tx, rx) = mpsc::unbounded_channel();
+        call.members.lock().unwrap().insert(
+            principal_id.to_string(),
+            Member {
+                id: principal_id.to_string(),
+                name: principal_name.to_string(),
+                tx,
             },
-            "audio".to_owned(),
-            format!("zenithar-{principal_id}"),
-        ));
-        let rtp_sender = pc
-            .add_track(Arc::clone(&send_track) as Arc<dyn TrackLocal + Send + Sync>)
-            .await?;
-        // Drain the sender's RTCP so interceptors (NACK/TWCC) run; ends on close.
-        tokio::spawn(async move {
-            let mut buf = vec![0u8; 1500];
-            while rtp_sender.read(&mut buf).await.is_ok() {}
-        });
+        );
+        tokio::spawn(
+            Driver {
+                reg: Arc::downgrade(self),
+                call: call.clone(),
+                my_id: principal_id.to_string(),
+                socket,
+                local_addr,
+                pc,
+                sender_id,
+                rx,
+            }
+            .run(),
+        );
 
-        // When this participant's microphone track arrives, forward every RTP
-        // packet to the other participants (and, later, the recorder).
-        let weak: Weak<Call> = Arc::downgrade(&call);
-        let me = principal_id.to_string();
-        pc.on_track(Box::new(move |track: Arc<TrackRemote>, _, _| {
-            let weak = weak.clone();
-            let me = me.clone();
-            Box::pin(async move {
-                tokio::spawn(async move {
-                    while let Ok((pkt, _)) = track.read_rtp().await {
-                        let Some(call) = weak.upgrade() else { break };
-                        for st in call.other_send_tracks(&me) {
-                            // SAFETY of audio quality: same Opus payload, just relayed.
-                            let _ = st.write_rtp(&pkt).await;
-                        }
-                        // Phase 5 tap: mux the same Opus into this speaker's .ogg.
-                        call.recorder.write(&me, &pkt);
-                    }
-                });
-            })
-        }));
-
-        // Trickle the server's ICE candidates to this participant.
-        let sig = self.signal.clone();
-        let room = room_id.to_string();
-        let target = principal_id.to_string();
-        let call_id = call.id.clone();
-        pc.on_ice_candidate(Box::new(move |cand| {
-            let sig = sig.clone();
-            let room = room.clone();
-            let target = target.clone();
-            let call_id = call_id.clone();
-            Box::pin(async move {
-                let Some(cand) = cand else {
-                    debug!("ice gathering complete (end-of-candidates)");
-                    return;
-                };
-                let Ok(init) = cand.to_json() else { return };
-                let Ok(candidate) = serde_json::to_string(&init) else {
-                    return;
-                };
-                // Visibility: what local candidate the server is advertising (e.g.
-                // confirm the nat_1to1 public IP + muxed port show up).
-                let n = sig.send(Signal {
-                    room_id: room,
-                    target: Some(target.clone()),
-                    exclude: None,
-                    frame: Outbound::CallIce { call_id, candidate: candidate.clone() },
-                });
-                info!(target = %target, %candidate, receivers = n.unwrap_or(0), "server ICE candidate");
-            })
-        }));
-
-        // Offer first, then register the participant so forwarding can find it.
-        let offer = pc.create_offer(None).await?;
-        pc.set_local_description(offer.clone()).await?;
-
-        let participant = Arc::new(Participant {
-            id: principal_id.to_string(),
-            name: principal_name.to_string(),
-            pc,
-            send_track,
-        });
-        call.participants
-            .lock()
-            .unwrap()
-            .insert(principal_id.to_string(), participant);
-
-        // Ring the room (others) and broadcast the updated roster.
         call.emit(
             None,
             Some(principal_id.to_string()),
@@ -370,60 +299,45 @@ impl CallRegistry {
             },
         );
 
-        Ok((call.id.clone(), offer.sdp))
+        Ok((call.id.clone(), offer_sdp))
     }
 
-    /// Apply a participant's SDP answer to the server's offer.
     pub async fn answer(&self, call_id: &str, principal_id: &str, sdp: String) -> Result<()> {
-        let Some(call) = self.find(call_id) else {
-            debug!(call_id, "answer for unknown call");
-            return Ok(());
-        };
-        let pc = {
-            let map = call.participants.lock().unwrap();
-            map.get(principal_id).map(|p| p.pc.clone())
-        };
-        if let Some(pc) = pc {
-            pc.set_remote_description(RTCSessionDescription::answer(sdp)?)
-                .await?;
-        }
+        self.send_cmd(call_id, principal_id, Cmd::Answer(sdp));
         Ok(())
     }
 
-    /// Add a participant's trickled ICE candidate.
     pub async fn ice(&self, call_id: &str, principal_id: &str, candidate: String) -> Result<()> {
-        let Some(call) = self.find(call_id) else {
-            return Ok(());
-        };
-        let pc = {
-            let map = call.participants.lock().unwrap();
-            map.get(principal_id).map(|p| p.pc.clone())
-        };
-        if let Some(pc) = pc {
-            let init: RTCIceCandidateInit = serde_json::from_str(&candidate)?;
-            pc.add_ice_candidate(init).await?;
-        }
+        self.send_cmd(call_id, principal_id, Cmd::RemoteIce(candidate));
         Ok(())
     }
 
-    /// A participant leaves. Closes their PeerConnection; when the call empties
-    /// it is dropped (finalizing any Phase 5 recording) and the room told.
     pub async fn leave(&self, call_id: &str, principal_id: &str) {
+        self.send_cmd(call_id, principal_id, Cmd::Close);
+    }
+
+    fn send_cmd(&self, call_id: &str, principal_id: &str, cmd: Cmd) {
+        if let Some(call) = self.find(call_id) {
+            if let Some(m) = call.members.lock().unwrap().get(principal_id) {
+                let _ = m.tx.send(cmd);
+            }
+        }
+    }
+
+    /// A driver task has exited (left, dropped, or its PC failed). Remove the
+    /// participant; when the call empties, finalize the recording, log the end,
+    /// and tell the room. Idempotent.
+    async fn member_gone(&self, call_id: &str, principal_id: &str) {
         let Some(call) = self.find(call_id) else {
             return;
         };
-        let (participant, now_empty) = {
-            let mut map = call.participants.lock().unwrap();
-            let p = map.remove(principal_id);
-            (p, map.is_empty())
+        let now_empty = {
+            let mut map = call.members.lock().unwrap();
+            map.remove(principal_id);
+            map.is_empty()
         };
-        if let Some(p) = participant {
-            let _ = p.pc.close().await;
-        }
         if now_empty {
             self.calls.lock().unwrap().remove(&call.room_id);
-            // Finalize the recording before marking the call ended; only point
-            // `recording_id` at it if at least one track was captured.
             let recorded = call.recorder.finalize();
             if let Err(e) = crate::db::end_call(&self.db, &call.id, crate::now_millis()).await {
                 warn!(error = %e, "failed to log call end");
@@ -451,4 +365,134 @@ impl CallRegistry {
             );
         }
     }
+}
+
+/// Owns one participant's PeerConnection + socket and drives the sans-IO loop.
+struct Driver {
+    reg: Weak<CallRegistry>,
+    call: Arc<Call>,
+    my_id: String,
+    socket: UdpSocket,
+    local_addr: SocketAddr,
+    pc: RTCPeerConnection,
+    sender_id: RTCRtpSenderId,
+    rx: mpsc::UnboundedReceiver<Cmd>,
+}
+
+impl Driver {
+    async fn run(mut self) {
+        let mut buf = vec![0u8; MAX_DATAGRAM];
+        'drive: loop {
+            // 1. Flush outgoing UDP.
+            while let Some(msg) = self.pc.poll_write() {
+                let _ = self.socket.send_to(&msg.message, msg.transport.peer_addr).await;
+            }
+
+            // 2. State events.
+            let mut dead = false;
+            while let Some(ev) = self.pc.poll_event() {
+                if let RTCPeerConnectionEvent::OnConnectionStateChangeEvent(s) = ev {
+                    debug!(participant = %self.my_id, state = %s, "pc state");
+                    if matches!(
+                        s,
+                        RTCPeerConnectionState::Failed
+                            | RTCPeerConnectionState::Disconnected
+                            | RTCPeerConnectionState::Closed
+                    ) {
+                        dead = true;
+                    }
+                }
+            }
+
+            // 3. Inbound RTP → record + forward to the other participants.
+            while let Some(m) = self.pc.poll_read() {
+                if let RTCMessage::RtpPacket(_, pkt) = m {
+                    self.call.recorder.write(&self.my_id, &pkt);
+                    let pkt = Arc::new(pkt);
+                    for tx in self.call.other_senders(&self.my_id) {
+                        let _ = tx.send(Cmd::Forward(pkt.clone()));
+                    }
+                }
+            }
+
+            if dead {
+                break 'drive;
+            }
+
+            // 4. Sleep until the next timer or some I/O.
+            let eto = self
+                .pc
+                .poll_timeout()
+                .unwrap_or_else(|| Instant::now() + MAX_IDLE);
+            let delay = eto
+                .checked_duration_since(Instant::now())
+                .unwrap_or_default()
+                .min(MAX_IDLE);
+            let timer = tokio::time::sleep(delay);
+            tokio::pin!(timer);
+
+            tokio::select! {
+                _ = &mut timer => {
+                    let _ = self.pc.handle_timeout(Instant::now());
+                }
+                r = self.socket.recv_from(&mut buf) => {
+                    if let Ok((n, peer)) = r {
+                        let _ = self.pc.handle_read(TaggedBytesMut {
+                            now: Instant::now(),
+                            transport: TransportContext {
+                                local_addr: self.local_addr,
+                                peer_addr: peer,
+                                ecn: None,
+                                transport_protocol: TransportProtocol::UDP,
+                            },
+                            message: BytesMut::from(&buf[..n]),
+                        });
+                    }
+                }
+                cmd = self.rx.recv() => {
+                    match cmd {
+                        Some(Cmd::Answer(sdp)) => {
+                            match RTCSessionDescription::answer(sdp) {
+                                Ok(a) => { let _ = self.pc.set_remote_description(a); }
+                                Err(e) => debug!(error = %e, "bad answer sdp"),
+                            }
+                        }
+                        Some(Cmd::RemoteIce(c)) => {
+                            match serde_json::from_str::<RTCIceCandidateInit>(&c) {
+                                Ok(init) => { let _ = self.pc.add_remote_candidate(init); }
+                                Err(e) => debug!(error = %e, "bad remote candidate"),
+                            }
+                        }
+                        Some(Cmd::Forward(pkt)) => {
+                            if let Some(mut sender) = self.pc.rtp_sender(self.sender_id) {
+                                let _ = sender.write_rtp((*pkt).clone());
+                            }
+                        }
+                        Some(Cmd::Close) | None => break 'drive,
+                    }
+                }
+            }
+        }
+
+        let _ = self.pc.close();
+        if let Some(reg) = self.reg.upgrade() {
+            reg.member_gone(&self.call.id, &self.my_id).await;
+        }
+    }
+}
+
+/// Build an ICE host candidate (as `RTCIceCandidateInit`) for `ip:port`.
+fn host_candidate(ip: &str, port: u16) -> Result<RTCIceCandidateInit> {
+    let cand = CandidateHostConfig {
+        base_config: CandidateConfig {
+            network: "udp".to_owned(),
+            address: ip.to_owned(),
+            port,
+            component: 1,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+    .new_candidate_host()?;
+    Ok(RTCIceCandidate::from(&cand).to_json()?)
 }
