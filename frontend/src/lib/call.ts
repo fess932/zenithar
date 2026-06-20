@@ -24,6 +24,10 @@ export const callParticipants = writable<CallParticipant[]>([]);
 export const callElapsed = writable<number>(0); // seconds, since connected
 export const callMuted = writable<boolean>(false);
 export const incoming = writable<Incoming | null>(null);
+/// Live audio levels (0..1): `local` = your mic, `remote` = what's coming back
+/// from the other side. Drives the call meters — and is a debugging aid: if your
+/// mic bar moves but the remote one doesn't, audio isn't returning from the peer.
+export const callLevels = writable<{ local: number; remote: number }>({ local: 0, remote: 0 });
 
 let pc: RTCPeerConnection | null = null;
 let localStream: MediaStream | null = null;
@@ -53,6 +57,67 @@ async function loadIceServers(): Promise<void> {
   } catch {
     /* keep the empty default */
   }
+}
+
+// ---- audio level metering (mic + incoming) ---------------------------------
+// A Web Audio AnalyserNode per stream → RMS → `callLevels`. Drives the on-call
+// meter and is a debugging aid (mic bar moves but remote doesn't = no audio back).
+type ACtor = typeof AudioContext;
+let meterCtxInst: AudioContext | null = null;
+let localAnalyser: AnalyserNode | null = null;
+let remoteAnalyser: AnalyserNode | null = null;
+let meterRaf: number | null = null;
+
+function meterCtx(): AudioContext | null {
+  const Ctor: ACtor | undefined =
+    window.AudioContext ?? (window as unknown as { webkitAudioContext?: ACtor }).webkitAudioContext;
+  if (!Ctor) return null;
+  meterCtxInst ??= new Ctor();
+  if (meterCtxInst.state === "suspended") void meterCtxInst.resume();
+  return meterCtxInst;
+}
+
+function analyserFor(stream: MediaStream): AnalyserNode | null {
+  const ctx = meterCtx();
+  if (!ctx) return null;
+  const an = ctx.createAnalyser();
+  an.fftSize = 256;
+  ctx.createMediaStreamSource(stream).connect(an);
+  return an;
+}
+
+function rmsLevel(an: AnalyserNode): number {
+  // Fresh ArrayBuffer-backed view (so the type is Uint8Array<ArrayBuffer>, what
+  // getByteTimeDomainData wants); allocation is negligible per frame.
+  const buf = new Uint8Array(new ArrayBuffer(an.fftSize));
+  an.getByteTimeDomainData(buf);
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) {
+    const x = (buf[i] - 128) / 128;
+    sum += x * x;
+  }
+  // RMS scaled so ordinary speech fills the meter; clamp to 0..1.
+  return Math.min(1, Math.sqrt(sum / buf.length) * 2.5);
+}
+
+function startMeter(): void {
+  if (meterRaf !== null) return;
+  const tick = (): void => {
+    callLevels.set({
+      local: localAnalyser ? rmsLevel(localAnalyser) : 0,
+      remote: remoteAnalyser ? rmsLevel(remoteAnalyser) : 0,
+    });
+    meterRaf = requestAnimationFrame(tick);
+  };
+  meterRaf = requestAnimationFrame(tick);
+}
+
+function stopMeter(): void {
+  if (meterRaf !== null) cancelAnimationFrame(meterRaf);
+  meterRaf = null;
+  localAnalyser = null;
+  remoteAnalyser = null;
+  callLevels.set({ local: 0, remote: 0 });
 }
 
 // The server (offerer) trickles its ICE candidates immediately after the offer,
@@ -135,13 +200,21 @@ async function onOffer(id: string, sdp: string): Promise<void> {
   pc = new RTCPeerConnection(rtcConfig);
   for (const tr of localStream.getTracks()) pc.addTrack(tr, localStream);
 
+  // Meter your own mic right away (shows capture works even before connect).
+  localAnalyser = analyserFor(localStream);
+  startMeter();
+
   pc.ontrack = (e) => {
+    const stream = e.streams[0] ?? new MediaStream([e.track]);
     if (!remoteAudio) {
       remoteAudio = new Audio();
       remoteAudio.autoplay = true;
     }
-    remoteAudio.srcObject = e.streams[0] ?? new MediaStream([e.track]);
+    remoteAudio.srcObject = stream;
     void remoteAudio.play().catch(() => {});
+    // Meter the incoming audio — if this bar stays flat, nothing is coming back.
+    remoteAnalyser = analyserFor(stream);
+    startMeter();
   };
   pc.onicecandidate = (e) => {
     if (e.candidate && callId) {
@@ -202,6 +275,7 @@ function startTimer(): void {
 
 function teardown(): void {
   clearConnectWatchdog();
+  stopMeter();
   pendingIce = [];
   remoteReady = false;
   if (timer) clearInterval(timer);

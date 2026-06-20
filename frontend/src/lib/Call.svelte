@@ -5,6 +5,7 @@
     callState,
     callElapsed,
     callMuted,
+    callLevels,
     incoming,
     startCall,
     acceptCall,
@@ -12,6 +13,8 @@
     hangup,
     toggleMute,
   } from "./call";
+
+  const pct = (v: number): number => Math.round(Math.min(1, Math.max(0, v)) * 100);
 
   function fmtDur(s: number): string {
     const m = Math.floor(s / 60);
@@ -51,6 +54,29 @@
         {$t("inCall")} · <span class="tabular-nums">{fmtDur($callElapsed)}</span>
       {/if}
     </span>
+
+    <!-- Live audio levels: 🎙 your mic, 🔊 incoming. If the mic bar moves but the
+         speaker bar stays flat, audio isn't coming back from the other side. -->
+    <div class="flex shrink-0 items-center gap-2" title={$t("audioLevels")}>
+      <span class="flex items-center gap-1" aria-hidden="true">
+        <span class="text-[0.7rem] leading-none">🎙</span>
+        <span class="h-2 w-7 overflow-hidden rounded-full bg-surface-2">
+          <span
+            class="block h-full rounded-full bg-you transition-[width] duration-75"
+            style="width: {pct($callLevels.local)}%"
+          ></span>
+        </span>
+      </span>
+      <span class="flex items-center gap-1" aria-hidden="true">
+        <span class="text-[0.7rem] leading-none">🔊</span>
+        <span class="h-2 w-7 overflow-hidden rounded-full bg-surface-2">
+          <span
+            class="block h-full rounded-full bg-beacon transition-[width] duration-75"
+            style="width: {pct($callLevels.remote)}%"
+          ></span>
+        </span>
+      </span>
+    </div>
 
     <button
       type="button"

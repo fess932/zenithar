@@ -295,6 +295,8 @@ impl CallRegistry {
                 sender_id,
                 rx,
                 logged_peer: false,
+                logged_rtp_in: false,
+                logged_rtp_out: false,
             }
             .run(),
         );
@@ -399,6 +401,10 @@ struct Driver {
     /// One-shot: log the first inbound datagram's source (the client's real,
     /// post-NAT address) so a deploy can confirm checks are arriving + from where.
     logged_peer: bool,
+    /// One-shot: first decrypted RTP we got FROM this participant (their mic).
+    logged_rtp_in: bool,
+    /// One-shot: first RTP we wrote TOWARD this participant (another's audio).
+    logged_rtp_out: bool,
 }
 
 impl Driver {
@@ -429,9 +435,18 @@ impl Driver {
             // 3. Inbound RTP → record + forward to the other participants.
             while let Some(m) = self.pc.poll_read() {
                 if let RTCMessage::RtpPacket(_, pkt) = m {
+                    let others = self.call.other_senders(&self.my_id);
+                    if !self.logged_rtp_in {
+                        self.logged_rtp_in = true;
+                        info!(
+                            participant = %self.my_id,
+                            forwarding_to = others.len(),
+                            "first RTP in (got this participant's audio)"
+                        );
+                    }
                     self.call.recorder.write(&self.my_id, &pkt);
                     let pkt = Arc::new(pkt);
-                    for tx in self.call.other_senders(&self.my_id) {
+                    for tx in others {
                         let _ = tx.send(Cmd::Forward(pkt.clone()));
                     }
                 }
@@ -496,7 +511,14 @@ impl Driver {
                         }
                         Some(Cmd::Forward(pkt)) => {
                             if let Some(mut sender) = self.pc.rtp_sender(self.sender_id) {
+                                if !self.logged_rtp_out {
+                                    self.logged_rtp_out = true;
+                                    info!(participant = %self.my_id, "first RTP out (writing audio toward this participant)");
+                                }
                                 let _ = sender.write_rtp((*pkt).clone());
+                            } else if !self.logged_rtp_out {
+                                self.logged_rtp_out = true;
+                                warn!(participant = %self.my_id, "no rtp_sender to forward into — audio won't reach this participant");
                             }
                         }
                         Some(Cmd::Close) | None => break 'drive,
