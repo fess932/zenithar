@@ -14,6 +14,7 @@ use tracing::info;
 mod api;
 mod auth;
 mod calls;
+mod dashproxy;
 mod db;
 mod models;
 mod names;
@@ -291,7 +292,10 @@ async fn main() -> Result<()> {
             "/api/integrations/{id}/revoke",
             post(routes::revoke_integration),
         )
-        // Admin: listen to saved call recordings.
+        // Admin: telemetry dashboard (reverse-proxied to GreptimeDB, cookie-gated)
+        // + link info + saved call recordings.
+        .route("/api/admin/telemetry", get(routes::telemetry_info))
+        .route("/otel/{*path}", any(dashproxy::proxy))
         .route("/api/admin/recordings", get(recordings::list))
         .route(
             "/api/admin/recordings/{call_id}/{participant_id}",

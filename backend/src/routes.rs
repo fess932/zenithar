@@ -338,3 +338,40 @@ pub async fn revoke_integration(
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
+
+// ---- admin: telemetry dashboard --------------------------------------------
+
+#[derive(Serialize)]
+pub struct TelemetryInfo {
+    /// Whether trace export is configured (ZENITHAR_OTLP_ENDPOINT set).
+    enabled: bool,
+    /// GreptimeDB HTTP port (parsed from the OTLP endpoint; its `/dashboard`
+    /// lives here). The client builds the URL with its own host, since the
+    /// configured endpoint host may be server-local (127.0.0.1).
+    port: u16,
+}
+
+/// `GET /api/admin/telemetry` — tells the admin UI whether to show a link to the
+/// GreptimeDB dashboard, and on which port.
+pub async fn telemetry_info(_admin: Admin) -> Json<TelemetryInfo> {
+    let endpoint = std::env::var("ZENITHAR_OTLP_ENDPOINT")
+        .ok()
+        .filter(|s| !s.is_empty());
+    let port = endpoint.as_deref().and_then(otlp_port).unwrap_or(4000);
+    Json(TelemetryInfo {
+        enabled: endpoint.is_some(),
+        port,
+    })
+}
+
+/// Pull the port out of an `http://host:port/...` OTLP endpoint.
+fn otlp_port(url: &str) -> Option<u16> {
+    url.split("://")
+        .nth(1)?
+        .split('/')
+        .next()?
+        .rsplit(':')
+        .next()?
+        .parse()
+        .ok()
+}

@@ -89,6 +89,7 @@ const ru = {
   noRecordings: "Записей пока нет.",
   commonRoom: "Общая",
   startedBy: "Инициатор",
+  telemetry: "Телеметрия",
   lastUsed: "Использован",
   neverUsed: "не использовался",
 } as const;
@@ -175,6 +176,7 @@ const en: Record<keyof typeof ru, string> = {
   noRecordings: "No recordings yet.",
   commonRoom: "Common",
   startedBy: "Started by",
+  telemetry: "Telemetry",
   lastUsed: "Last used",
   neverUsed: "never used",
 };

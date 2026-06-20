@@ -143,3 +143,19 @@ export async function listRecordings(): Promise<Recording[]> {
   const r = await fetch("/api/admin/recordings");
   return r.ok ? ((await r.json()) as Recording[]) : [];
 }
+
+// ---- telemetry dashboard ---------------------------------------------------
+
+export interface TelemetryInfo {
+  enabled: boolean;
+  port: number;
+}
+
+export async function getTelemetry(): Promise<TelemetryInfo> {
+  try {
+    const r = await fetch("/api/admin/telemetry");
+    return r.ok ? ((await r.json()) as TelemetryInfo) : { enabled: false, port: 4000 };
+  } catch {
+    return { enabled: false, port: 4000 };
+  }
+}

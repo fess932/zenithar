@@ -12,9 +12,11 @@
     rotateIntegration,
     revokeIntegration,
     listRecordings,
+    getTelemetry,
     type PrincipalSummary,
     type IntegrationSummary,
     type Recording,
+    type TelemetryInfo,
     type Link,
   } from "./session";
 
@@ -35,13 +37,19 @@
   // call recordings
   let recordings: Recording[] = [];
 
+  // telemetry dashboard (GreptimeDB), reverse-proxied on our own origin behind
+  // admin auth — link shown only when export is enabled.
+  let telemetry: TelemetryInfo = { enabled: false, port: 4000 };
+  const telemetryUrl = "/otel/dashboard";
+
   onMount(refresh);
 
   async function refresh(): Promise<void> {
-    [rows, integrations, recordings] = await Promise.all([
+    [rows, integrations, recordings, telemetry] = await Promise.all([
       listPrincipals(),
       listIntegrations(),
       listRecordings(),
+      getTelemetry(),
     ]);
   }
 
@@ -127,6 +135,16 @@
       ← {$t("back")}
     </button>
     <span class="font-mono text-[0.78rem] text-muted">{$t("adminLinks")}</span>
+    {#if telemetry.enabled}
+      <a
+        href={telemetryUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="ml-auto inline-flex min-h-9 items-center gap-1.5 rounded-md border border-line px-2.5 font-mono text-[0.72rem] text-muted hover:border-beacon hover:text-beacon"
+      >
+        📊 {$t("telemetry")}
+      </a>
+    {/if}
   </header>
 
   <main class="overflow-y-auto px-3 py-4 sm:px-5">
