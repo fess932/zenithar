@@ -69,22 +69,22 @@ Fix: advertise the public IP (NAT 1:1). No STUN/TURN needed.
 > router's public IP from inside needs NAT hairpin, which most routers don't do —
 > so a same-LAN test call will `ICE failed` even when the setup is correct.
 
-### Pin the media UDP port range (`ZENITHAR_UDP_PORTS`)
+### Pin the media UDP port (`ZENITHAR_UDP_PORTS`)
 
-By default each call binds a **random** high UDP port, so you can only make calls
-work by forwarding the *entire* UDP range (true DMZ). To forward a small, known
-range instead — and to be able to test reachability directly — pin it:
+By default each call binds a **random** high UDP port. Pin all media to ONE fixed
+UDP port (muxed, bound `0.0.0.0`) so the router only has to forward a single port,
+and it's directly testable:
 
 ```yaml
     environment:
       ZENITHAR_PUBLIC_IP: "203.0.113.7"
-      ZENITHAR_UDP_PORTS: "51000-51200"   # ~1-2 ports per call leg; avoid ports in use (e.g. WireGuard)
+      ZENITHAR_UDP_PORTS: "51000"   # one port for all calls; avoid ports in use (e.g. WireGuard)
 ```
 
-Then forward **UDP 51000–51200** to the server in the router, and verify it's
-actually reachable from outside (this is the usual culprit when calls still fail
-with the public candidate present but `sendto … / timed out` on the client).
-Watch packets arrive on the server (passive — no listener binding to get wrong):
+Then forward **UDP 51000** to the server in the router, and verify it's actually
+reachable from outside (the usual culprit when calls still fail with the public
+candidate present but `sendto … / timed out` on the client). Watch packets arrive
+on the server (passive — no listener binding to get wrong):
 
 ```sh
 # on the server host (not the distroless container):
@@ -152,8 +152,7 @@ Or, more surgically, stop advertising that global-scope ULA on the bridge.
 | `ZENITHAR_RECORDINGS` | `<data>/recordings` | Server-side call recordings (`<call_id>.<participant_id>.ogg`). |
 | `ZENITHAR_STUN` | — | Comma-separated STUN URLs for ICE. Empty = host candidates (LAN/localhost). |
 | `ZENITHAR_PUBLIC_IP` | — | Public IP(s) to advertise as host candidates (NAT 1:1). Set on a server behind NAT/DMZ so remote browsers can reach the media path. |
-| `ZENITHAR_UDP_PORTS` | — | Fixed media UDP port range, e.g. `51000-51200`. Forward exactly this range in the router. Empty = random ephemeral ports. |
-| `ZENITHAR_MEDIA_IP` | — | On a multi-homed host (host networking + extra bridges/VPN), the LAN IP to bind call media on (the one the DMZ forwards to, e.g. `10.51.0.10`). Empty = gather on all interfaces. |
+| `ZENITHAR_UDP_PORTS` | — | Single media UDP port (muxed, bound `0.0.0.0`), e.g. `51000`. Forward just this port in the router. Empty = random ephemeral port. |
 | `ZENITHAR_SECURE_COOKIES` | `0` | `1`/`true` to mark the auth cookie `Secure` (behind TLS). |
 | `RUST_LOG` | `info` | Log filter (`tracing` env-filter syntax). |
 

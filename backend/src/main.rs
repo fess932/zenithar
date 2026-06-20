@@ -199,24 +199,19 @@ async fn main() -> Result<()> {
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .collect();
-    // Fixed UDP port range for call media (e.g. "50000-50100"), so a NAT/DMZ can
-    // forward exactly that range and it's testable. Empty/invalid = ephemeral.
-    let udp_ports: Option<(u16, u16)> = std::env::var("ZENITHAR_UDP_PORTS")
+    // Single fixed UDP port for all call media (bound 0.0.0.0 via a mux). Forward
+    // just this one UDP port in the NAT/DMZ. Empty = random ephemeral. Accepts a
+    // bare port ("51000") or a range ("51000-51200"), using the first port.
+    let media_port: Option<u16> = std::env::var("ZENITHAR_UDP_PORTS")
         .ok()
-        .and_then(|v| v.split_once('-').map(|(a, b)| (a.trim().to_string(), b.trim().to_string())))
-        .and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)));
-    // On a multi-homed host, the LAN interface IP to bind call media on (the one
-    // the router/DMZ forwards to, e.g. 10.51.0.10). Empty = gather on all.
-    let media_ip: Option<String> = std::env::var("ZENITHAR_MEDIA_IP")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+        .and_then(|v| {
+            v.split(['-', ',']).next().map(str::trim).and_then(|p| p.parse().ok())
+        });
     // Surface the call/media config at startup so a deploy can confirm the new
     // binary is live (e.g. that ZENITHAR_UDP_PORTS is actually honored).
     info!(
         public_ips = ?public_ips,
-        udp_ports = ?udp_ports,
-        media_ip = ?media_ip,
+        media_port = ?media_port,
         stun = ?stun,
         "call media config"
     );
@@ -229,8 +224,7 @@ async fn main() -> Result<()> {
     let calls = Arc::new(calls::CallRegistry::new(
         stun,
         public_ips,
-        udp_ports,
-        media_ip,
+        media_port,
         signal_tx.clone(),
         write_pool.clone(),
         recordings_dir,

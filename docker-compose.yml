@@ -3,12 +3,11 @@ services:
     build: .
     image: ghcr.io/fess932/zenithar:latest
     # --- Networking for voice calls --------------------------------------------
-    # Call MEDIA is UDP. Use HOST networking (below) so the app binds the host's
-    # real NIC directly. On a multi-homed host (extra podman bridges, WireGuard)
-    # ICE would bind media on the wrong interface, so ALSO set ZENITHAR_MEDIA_IP
-    # to the LAN IP the router/DMZ forwards to, and ZENITHAR_UDP_PORTS to a fixed
-    # range you forward. (Bridged alternative: drop `network_mode: host`, add a
-    # `ports:` block publishing "3000:3000" and "<range>:<range>/udp".)
+    # Call MEDIA is UDP, muxed over ONE fixed port (ZENITHAR_UDP_PORTS) bound to
+    # 0.0.0.0. With HOST networking that socket is on the host's real NIC, so the
+    # router/DMZ just needs to forward that single UDP port to this host. (Bridged
+    # alternative: drop `network_mode: host` and publish it: add a `ports:` block
+    # with "3000:3000" and "<port>:<port>/udp".)
     network_mode: host
     volumes:
       # Local ./data holds the SQLite DB, attachments, call recordings, and the
@@ -29,10 +28,7 @@ services:
       # STUN for WebRTC ICE (comma-separated). Empty works on a LAN/localhost.
       ZENITHAR_STUN: ""
       ZENITHAR_PUBLIC_IP: "<external ip>"
-      # Fixed media UDP range — forward exactly this in the router (avoid ports
-      # already in use, e.g. WireGuard on 50000/50001).
-      ZENITHAR_UDP_PORTS: "51000-51200"
-      # Multi-homed host: bind media on this LAN IP (the one the DMZ forwards to),
-      # not a podman bridge. Match it to your real NIC, e.g. 10.51.0.10.
-      ZENITHAR_MEDIA_IP: "<lan ip>"
+      # Single media UDP port (mux), forwarded in the router. Avoid ports already
+      # in use (e.g. WireGuard on 50000/50001).
+      ZENITHAR_UDP_PORTS: "51000"
     restart: unless-stopped

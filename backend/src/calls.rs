@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tokio::sync::broadcast;
 use tracing::{debug, warn};
 use ulid::Ulid;
@@ -25,7 +25,8 @@ use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS};
 use webrtc::api::setting_engine::SettingEngine;
 use webrtc::api::{APIBuilder, API};
-use webrtc::ice::udp_network::{EphemeralUDP, UDPNetwork};
+use webrtc::ice::udp_mux::{UDPMuxDefault, UDPMuxParams};
+use webrtc::ice::udp_network::UDPNetwork;
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 use webrtc::ice_transport::ice_candidate_type::RTCIceCandidateType;
 use webrtc::ice_transport::ice_server::RTCIceServer;
@@ -112,8 +113,7 @@ impl CallRegistry {
     pub fn new(
         stun: Vec<String>,
         public_ips: Vec<String>,
-        udp_ports: Option<(u16, u16)>,
-        media_ip: Option<String>,
+        media_port: Option<u16>,
         signal: broadcast::Sender<Signal>,
         db: sqlx::SqlitePool,
         recordings_dir: PathBuf,
@@ -137,22 +137,19 @@ impl CallRegistry {
         if !public_ips.is_empty() {
             setting.set_nat_1to1_ips(public_ips, RTCIceCandidateType::Host);
         }
-        // Pin the media UDP ports to a fixed range so a self-host behind NAT can
-        // forward exactly that range (instead of the whole ephemeral space) and
-        // test reachability directly. Without this, each call binds a random high
-        // port. Needs enough ports for concurrent legs (a few per call).
-        if let Some((lo, hi)) = udp_ports {
-            match EphemeralUDP::new(lo, hi) {
-                Ok(eph) => setting.set_udp_network(UDPNetwork::Ephemeral(eph)),
-                Err(e) => warn!(error = %e, lo, hi, "invalid ZENITHAR_UDP_PORTS range; ignoring"),
-            }
-        }
-        // On a multi-homed host (e.g. host networking with podman bridges
-        // alongside the real LAN NIC), ICE otherwise binds media sockets on the
-        // WRONG interface (a 192.168.x bridge), so forwarded UDP arriving on the
-        // real interface never reaches the socket. Pin gathering to one IP.
-        if let Some(ip) = media_ip {
-            setting.set_ip_filter(Box::new(move |cand_ip| cand_ip.to_string() == ip));
+        // All call media over ONE fixed UDP port via a mux, bound to 0.0.0.0 so it
+        // receives on every interface (key on a multi-homed / host-networked box:
+        // forwarded UDP arriving on the real NIC is caught regardless of which
+        // interface ICE would otherwise pick). One port to forward in the DMZ, and
+        // it sidesteps the per-interface ephemeral binding that failed to gather
+        // here. Many PeerConnections demux over this single socket by ufrag.
+        if let Some(port) = media_port {
+            let std_sock = std::net::UdpSocket::bind(("0.0.0.0", port))
+                .with_context(|| format!("bind media UDP 0.0.0.0:{port}"))?;
+            std_sock.set_nonblocking(true)?;
+            let sock = tokio::net::UdpSocket::from_std(std_sock)?;
+            let mux = UDPMuxDefault::new(UDPMuxParams::new(sock));
+            setting.set_udp_network(UDPNetwork::Muxed(mux));
         }
 
         let api = APIBuilder::new()
