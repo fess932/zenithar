@@ -11,10 +11,12 @@ services:
     # block with "3000:3000" and "51000-51200:51000-51200/udp".)
     network_mode: host
     volumes:
-      # Local ./data holds the SQLite DB, attachments, call recordings, and the
-      # bootstrap admin link. The container runs as root, so it can write here
-      # even when the host creates ./data as root — no manual chown needed.
-      - ./data:/data
+      # Persistent data (SQLite DB, attachments, call recordings, bootstrap admin
+      # link) lives at an ABSOLUTE host path OUTSIDE the deploy/clone dir, so a
+      # redeploy that re-clones the stack folder can't wipe it. Create it once:
+      #   sudo mkdir -p /opt/zenithar/data
+      # The container runs as root, so it can write here without a manual chown.
+      - /opt/zenithar/data:/data
     healthcheck:
       # The binary checks itself over loopback (distroless has no curl/wget).
       test: ["CMD", "zenithar-backend", "healthcheck"]
@@ -51,7 +53,7 @@ services:
   # GreptimeDB has no auth by default — firewall it or bind 127.0.0.1 if this
   # host is public.
   greptimedb:
-    image: greptime/greptimedb:1.1.1
+    image: greptime/greptimedb:v1.1.1
     network_mode: host
     command:
       - standalone
@@ -60,5 +62,5 @@ services:
       - --rpc-bind-addr=0.0.0.0:4001
       - --data-home=/greptimedb_data
     volumes:
-      - ./data/greptimedb:/greptimedb_data
+      - /opt/zenithar/data/greptimedb:/greptimedb_data
     restart: unless-stopped
