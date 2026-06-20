@@ -112,6 +112,25 @@ export const status = writable<Status>("connecting");
 export const rooms = writable<RoomSummary[]>([]);
 export const activeRoom = writable<string | null>(null);
 
+// Remember the open room across reloads: persist whenever it changes, and rejoin
+// it on (re)connect if it still exists (the server falls back to the default room
+// otherwise). Lets a refresh keep you where you were.
+const ROOM_KEY = "zenithar.room";
+activeRoom.subscribe((r) => {
+  try {
+    if (r) localStorage.setItem(ROOM_KEY, r);
+  } catch {
+    /* private mode — in-memory only */
+  }
+});
+function rememberedRoom(): string | null {
+  try {
+    return localStorage.getItem(ROOM_KEY);
+  } catch {
+    return null;
+  }
+}
+
 /// Currently-online principals: id → kind. Reset whenever the socket reconnects
 /// (a fresh snapshot follows). Lets the UI show online dots / counts.
 export const online = writable<Record<string, string>>({});
@@ -175,8 +194,10 @@ export function connect(): void {
   ws.onopen = () => {
     backoff = 500;
     status.set("live");
-    // Restore the room we were viewing (server otherwise picks the default).
-    const want = get(activeRoom);
+    // Restore the room we were viewing (in memory after a reconnect, or from
+    // localStorage after a full reload). The server denies + ignores it if the
+    // room no longer exists, leaving us on the default it already sent.
+    const want = get(activeRoom) ?? rememberedRoom();
     if (want) ws?.send(JSON.stringify({ type: "join", room_id: want }));
     // Flush anything composed while offline (idempotent via client_msg_id).
     flushPending();

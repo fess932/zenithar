@@ -8,7 +8,7 @@ use ulid::Ulid;
 
 use crate::auth::{Identity, Principal};
 use crate::db;
-use crate::models::{ChatMessage, Inbound, Outbound};
+use crate::models::{ChatMessage, Inbound, Outbound, Signal};
 use crate::ratelimit::LocalBucket;
 use crate::state::AppState;
 
@@ -163,6 +163,25 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                         }
                         match state.calls.join(&room_id, &principal.id, &principal.display_name).await {
                             Ok((call_id, sdp)) => {
+                                // An anonymous client starting a call rings EVERY
+                                // employee cross-room (the per-room ring comes from
+                                // join()), so anyone on the team can pick it up. The
+                                // ring carries the room so the client-side shows the
+                                // channel name and can switch into it on answer.
+                                if !is_employee {
+                                    let _ = state.signal.send(Signal {
+                                        room_id: room_id.clone(),
+                                        target: None,
+                                        exclude: Some(principal.id.clone()),
+                                        all_employees: true,
+                                        frame: Outbound::CallRinging {
+                                            call_id: call_id.clone(),
+                                            room_id: room_id.clone(),
+                                            from: principal.id.clone(),
+                                            from_name: principal.display_name.clone(),
+                                        },
+                                    });
+                                }
                                 let frame = Outbound::CallOffer { call_id, sdp };
                                 if let Ok(json) = serde_json::to_string(&frame) {
                                     if sender.send(Message::Text(json.into())).await.is_err() {
@@ -196,8 +215,13 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                     Ok(s) => {
                         let deliver = match &s.target {
                             Some(t) => *t == principal.id,
-                            None => s.room_id == active_room
-                                && s.exclude.as_deref() != Some(principal.id.as_str()),
+                            None => {
+                                let in_room = s.room_id == active_room;
+                                // Cross-room ring for employees viewing another room.
+                                let cross_employee = s.all_employees && is_employee && !in_room;
+                                (in_room || cross_employee)
+                                    && s.exclude.as_deref() != Some(principal.id.as_str())
+                            }
                         };
                         if deliver {
                             if let Ok(json) = serde_json::to_string(&s.frame) {

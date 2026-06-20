@@ -158,5 +158,9 @@ pub struct Signal {
     pub room_id: String,
     pub target: Option<String>,
     pub exclude: Option<String>,
+    /// Deliver to every employee NOT currently viewing `room_id` (cross-room),
+    /// on top of the normal room-scoped delivery. Used to ring all employees when
+    /// an anonymous client starts a call, so anyone on the team can pick it up.
+    pub all_employees: bool,
     pub frame: Outbound,
 }

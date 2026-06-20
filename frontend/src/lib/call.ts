@@ -3,7 +3,8 @@
 // participants and, later, records it). The server is always the offerer, so we
 // only ever answer. Signaling rides the shared chat WebSocket (see chat.ts).
 import { get, writable } from "svelte/store";
-import { onSignal, sendFrame, notify } from "./chat";
+import { onSignal, sendFrame, notify, joinRoom } from "./chat";
+import { isMuted } from "./notify";
 import { t } from "./i18n";
 
 export type CallState = "idle" | "ringing" | "connecting" | "live";
@@ -159,10 +160,13 @@ function clearConnectWatchdog(): void {
   connectTimer = null;
 }
 
-/// Accept the currently ringing call.
+/// Accept the currently ringing call. Switch into that room first (so an employee
+/// answering a client's cross-room ring lands in the channel), then join the call.
 export function acceptCall(): void {
   const inc = get(incoming);
-  if (inc) startCall(inc.roomId);
+  if (!inc) return;
+  joinRoom(inc.roomId);
+  startCall(inc.roomId);
 }
 
 /// Decline a ringing call (just dismiss; we never joined).
@@ -305,9 +309,12 @@ export function initCallSignaling(): void {
       case "call-ringing": {
         // Don't ring for a call we're already in.
         if (get(callState) !== "idle") return;
+        const roomId = f.room_id as string;
+        // A muted room (per-room mute) doesn't ring — same as its messages.
+        if (isMuted(roomId)) return;
         incoming.set({
           callId: f.call_id as string,
-          roomId: f.room_id as string,
+          roomId,
           fromName: f.from_name as string,
         });
         callState.set("ringing");

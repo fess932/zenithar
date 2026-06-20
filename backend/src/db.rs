@@ -404,11 +404,19 @@ pub async fn set_call_recording(
 /// Rooms an employee can see: common first, then each client room (titled with
 /// the client's display name), oldest client first.
 pub async fn list_rooms_for_user(reads: &SqlitePool) -> sqlx::Result<Vec<RoomSummary>> {
+    // The common room is always pinned first; the rest sort by most-recent
+    // activity (newest message or call), newest first, falling back to creation.
     let rooms = sqlx::query_as::<_, RoomSummary>(
         "SELECT r.id, r.kind, p.display_name AS title, r.client_id AS client_id, r.created_at
          FROM rooms r
          LEFT JOIN principals p ON p.id = r.client_id
-         ORDER BY (r.kind = 'common') DESC, r.created_at ASC, r.id ASC",
+         ORDER BY
+           (r.kind = 'common') DESC,
+           MAX(
+             COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.room_id = r.id), 0),
+             COALESCE((SELECT MAX(c.started_at) FROM calls c WHERE c.room_id = r.id), 0)
+           ) DESC,
+           r.created_at DESC, r.id DESC",
     )
     .fetch_all(reads)
     .await?;

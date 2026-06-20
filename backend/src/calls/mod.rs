@@ -107,6 +107,7 @@ impl Call {
             room_id: self.room_id.clone(),
             target,
             exclude,
+            all_employees: false,
             frame,
         });
     }
