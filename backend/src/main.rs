@@ -322,7 +322,14 @@ async fn main() -> Result<()> {
             post(api::upload).layer(DefaultBodyLimit::max(uploads::MAX_UPLOAD_BYTES + 1024)),
         )
         .fallback(static_handler)
-        .layer(TraceLayer::new_for_http())
+        // INFO-level request spans so every HTTP request becomes an exported
+        // trace (the default is DEBUG, which the `info` filter drops — leaving
+        // only call spans). Makes telemetry visible from ordinary browsing.
+        .layer(
+            TraceLayer::new_for_http().make_span_with(
+                tower_http::trace::DefaultMakeSpan::new().level(tracing::Level::INFO),
+            ),
+        )
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
