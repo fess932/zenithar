@@ -41,7 +41,9 @@ use webrtc::track::track_local::{TrackLocal, TrackLocalWriter};
 use webrtc::track::track_remote::TrackRemote;
 
 use crate::models::{CallParticipant, Outbound, Signal};
-use crate::recorder::Recorder;
+use recorder::Recorder;
+
+mod recorder;
 
 /// One person's leg of a call: their server-side PeerConnection plus the local
 /// track that carries *the other participants'* audio down to them.

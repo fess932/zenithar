@@ -36,9 +36,24 @@ let connectTimer: ReturnType<typeof setTimeout> | null = null;
 // instead of sitting on "connecting…" forever (e.g. ICE can't traverse NAT).
 const CONNECT_TIMEOUT_MS = 20000;
 
-// Empty ICE list works on localhost/LAN (host candidates); the server has a
-// public IP, so no TURN. A public STUN can be added later if needed.
-const RTC_CONFIG: RTCConfiguration = { iceServers: [] };
+// ICE servers (STUN/TURN). Fetched from the server (`/api/ice`, driven by
+// ZENITHAR_ICE_SERVERS) so a self-host can point calls at its own coturn without
+// rebuilding the frontend. STUN lets a client behind NAT learn its own public
+// address and offer it to the server — required when the server can't derive it
+// via peer-reflexive. Empty (default) still works on a LAN / same network.
+let rtcConfig: RTCConfiguration = { iceServers: [] };
+
+async function loadIceServers(): Promise<void> {
+  try {
+    const r = await fetch("/api/ice");
+    if (r.ok) {
+      const servers = (await r.json()) as RTCIceServer[];
+      if (Array.isArray(servers)) rtcConfig = { iceServers: servers };
+    }
+  } catch {
+    /* keep the empty default */
+  }
+}
 
 // The server (offerer) trickles its ICE candidates immediately after the offer,
 // often BEFORE our getUserMedia resolves and we've built `pc` + set the remote
@@ -117,7 +132,7 @@ async function onOffer(id: string, sdp: string): Promise<void> {
     return;
   }
 
-  pc = new RTCPeerConnection(RTC_CONFIG);
+  pc = new RTCPeerConnection(rtcConfig);
   for (const tr of localStream.getTracks()) pc.addTrack(tr, localStream);
 
   pc.ontrack = (e) => {
@@ -210,6 +225,7 @@ function teardown(): void {
 /// Wire the signaling frames coming off the shared chat socket. Call once at app
 /// start (after `connect()`), idempotent enough for a single mount.
 export function initCallSignaling(): void {
+  void loadIceServers(); // refresh ICE config (STUN/TURN) before any call starts
   onSignal((f) => {
     switch (f.type) {
       case "call-ringing": {

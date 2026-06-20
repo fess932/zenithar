@@ -20,7 +20,6 @@ mod models;
 mod names;
 mod presence;
 mod ratelimit;
-mod recorder;
 mod routes;
 mod send;
 mod state;
@@ -249,6 +248,7 @@ async fn main() -> Result<()> {
         .route("/api/health", get(|| async { "ok" }))
         .route("/i/{token}", get(routes::enter_link))
         .route("/api/me", get(routes::me))
+        .route("/api/ice", get(routes::ice_servers))
         .route("/api/me/name", post(routes::rename))
         .route("/api/rooms", get(routes::rooms))
         .route(

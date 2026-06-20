@@ -118,6 +118,17 @@ pub async fn rename(
     }
 }
 
+// ---- ice servers (WebRTC) --------------------------------------------------
+
+/// `GET /api/ice` — the ICE servers the browser should use (STUN/TURN), straight
+/// from `ZENITHAR_ICE_SERVERS` (a JSON array of `RTCIceServer`). Served to the
+/// client so STUN/TURN can change without rebuilding the frontend. Public: it's
+/// just config, no secrets beyond whatever TURN creds the operator puts there.
+pub async fn ice_servers() -> Json<serde_json::Value> {
+    let raw = std::env::var("ZENITHAR_ICE_SERVERS").unwrap_or_default();
+    Json(serde_json::from_str(&raw).unwrap_or_else(|_| serde_json::json!([])))
+}
+
 // ---- rooms -----------------------------------------------------------------
 
 /// `GET /api/rooms` — rooms the caller may open. Clients get their single room
