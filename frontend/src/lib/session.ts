@@ -151,6 +151,25 @@ export interface TelemetryInfo {
   port: number;
 }
 
+// ---- connections (presence list) -------------------------------------------
+
+export interface Person {
+  id: string;
+  name: string;
+  kind: string;
+  online: boolean;
+  last_seen: number | null; // unix millis of last activity
+}
+
+export async function listPeople(): Promise<Person[]> {
+  try {
+    const r = await fetch("/api/people");
+    return r.ok ? ((await r.json()) as Person[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function getTelemetry(): Promise<TelemetryInfo> {
   try {
     const r = await fetch("/api/admin/telemetry");

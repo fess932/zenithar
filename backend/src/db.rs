@@ -431,6 +431,14 @@ pub async fn list_recorded_calls(reads: &SqlitePool) -> sqlx::Result<Vec<Recorde
     .await
 }
 
+/// Everyone in the connections list: human principals (employees + clients),
+/// not integration bots. Online status + last-seen are overlaid from presence.
+pub async fn list_people(reads: &SqlitePool) -> sqlx::Result<Vec<(String, String, String)>> {
+    sqlx::query_as("SELECT id, display_name, kind FROM principals WHERE kind IN ('user','client')")
+        .fetch_all(reads)
+        .await
+}
+
 /// Map of principal id → display name (for labeling recording tracks by speaker).
 pub async fn all_principal_names(
     reads: &SqlitePool,

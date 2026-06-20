@@ -266,6 +266,7 @@ async fn main() -> Result<()> {
         .route("/api/ice", get(routes::ice_servers))
         .route("/api/me/name", post(routes::rename))
         .route("/api/rooms", get(routes::rooms))
+        .route("/api/people", get(routes::people))
         .route(
             "/api/upload",
             post(uploads::upload).layer(DefaultBodyLimit::max(uploads::MAX_UPLOAD_BYTES + 1024)),

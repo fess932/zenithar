@@ -2,6 +2,7 @@
   import { lang, t } from "./i18n";
   import { status } from "./chat";
   import { me, renameMe, logout } from "./session";
+  import Connections from "./Connections.svelte";
 
   export let onOpenAdmin: () => void;
   export let isEmployee = false;
@@ -20,6 +21,7 @@
   let editing = false;
   let draft = "";
   let menuOpen = false;
+  let showConnections = false;
 
   function startEdit(): void {
     if ($me?.kind !== "user") return; // clients are anonymous
@@ -102,12 +104,30 @@
       {/if}
     {/if}
 
-    <span
-      class="beacon flex items-center gap-2 font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted"
-      data-state={$status}
-    >
-      <span class="beacon-dot"></span><span class="hidden sm:inline">{$t(statusKey[$status])}</span>
-    </span>
+    {#if isEmployee}
+      <!-- Connection status doubles as the "who's online" (connections) button. -->
+      <button
+        type="button"
+        onclick={() => (showConnections = true)}
+        title={$t("connections")}
+        aria-label={$t("connections")}
+        class="beacon flex cursor-pointer items-center gap-2 font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted hover:text-text"
+        data-state={$status}
+      >
+        <span class="beacon-dot"></span><span class="hidden sm:inline"
+          >{$t(statusKey[$status])}</span
+        >
+      </button>
+    {:else}
+      <span
+        class="beacon flex items-center gap-2 font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted"
+        data-state={$status}
+      >
+        <span class="beacon-dot"></span><span class="hidden sm:inline"
+          >{$t(statusKey[$status])}</span
+        >
+      </span>
+    {/if}
 
     <!-- Desktop: language + logout inline -->
     <div class="hidden items-center gap-[1.1rem] sm:flex">
@@ -196,5 +216,9 @@
         </button>
       {/if}
     </div>
+  {/if}
+
+  {#if showConnections}
+    <Connections onClose={() => (showConnections = false)} />
   {/if}
 </header>

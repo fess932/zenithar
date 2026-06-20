@@ -13,6 +13,9 @@ use crate::models::{Outbound, PresenceEntry};
 pub struct PresenceRegistry {
     // principal_id -> (kind, live connection count)
     online: Mutex<HashMap<String, (String, usize)>>,
+    // principal_id -> unix millis of last activity (kept after they go offline,
+    // so the connections list can show when they were last seen).
+    last_seen: Mutex<HashMap<String, i64>>,
     tx: broadcast::Sender<Outbound>,
 }
 
@@ -21,8 +24,28 @@ impl PresenceRegistry {
         let (tx, _) = broadcast::channel(256);
         Self {
             online: Mutex::new(HashMap::new()),
+            last_seen: Mutex::new(HashMap::new()),
             tx,
         }
+    }
+
+    /// Record activity (a received frame) so we know when this principal was last
+    /// seen — the last-packet time shown in the connections list.
+    pub fn touch(&self, id: &str) {
+        self.last_seen
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), crate::now_millis());
+    }
+
+    /// Snapshot of `principal_id -> last-seen millis`.
+    pub fn last_seen_map(&self) -> HashMap<String, i64> {
+        self.last_seen.lock().unwrap().clone()
+    }
+
+    /// Whether a principal has at least one live connection right now.
+    pub fn is_online(&self, id: &str) -> bool {
+        self.online.lock().unwrap().contains_key(id)
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Outbound> {
@@ -31,6 +54,7 @@ impl PresenceRegistry {
 
     /// Register a connection; broadcasts `presence: online` on the 0→1 edge.
     pub fn join(&self, id: &str, kind: &str) {
+        self.touch(id);
         let became_online = {
             let mut map = self.online.lock().unwrap();
             let e = map.entry(id.to_string()).or_insert((kind.to_string(), 0));

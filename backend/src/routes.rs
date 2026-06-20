@@ -339,6 +339,47 @@ pub async fn revoke_integration(
     }
 }
 
+// ---- connections (presence list) -------------------------------------------
+
+#[derive(Serialize)]
+pub struct Person {
+    id: String,
+    name: String,
+    kind: String,
+    online: bool,
+    /// Unix millis of last activity (last received frame); `None` if never seen
+    /// since the server started.
+    last_seen: Option<i64>,
+}
+
+/// `GET /api/people` — the connections list: every human principal with live
+/// online status + last-seen. Employees only (clients don't get a team roster).
+pub async fn people(State(state): State<AppState>, Identity(p): Identity) -> Response {
+    if !auth::is_staff(&p.kind) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let roster = match db::list_people(&state.reads).await {
+        Ok(r) => r,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let last_seen = state.presence.last_seen_map();
+    let people: Vec<Person> = roster
+        .into_iter()
+        .map(|(id, name, kind)| {
+            let online = state.presence.is_online(&id);
+            let last = last_seen.get(&id).copied();
+            Person {
+                online,
+                last_seen: last,
+                id,
+                name,
+                kind,
+            }
+        })
+        .collect();
+    Json(people).into_response()
+}
+
 // ---- admin: telemetry dashboard --------------------------------------------
 
 #[derive(Serialize)]

@@ -84,6 +84,8 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
             // Inbound from this socket.
             inbound = receiver.next() => {
                 let Some(Ok(msg)) = inbound else { break };
+                // Any frame counts as activity (last-seen for the connections list).
+                state.presence.touch(&principal.id);
                 let text = match msg {
                     Message::Text(t) => t,
                     Message::Close(_) => break,
