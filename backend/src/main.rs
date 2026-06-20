@@ -293,9 +293,12 @@ async fn main() -> Result<()> {
             post(routes::revoke_integration),
         )
         // Admin: telemetry dashboard (reverse-proxied to GreptimeDB, cookie-gated)
-        // + link info + saved call recordings.
+        // + link info + saved call recordings. We mirror GreptimeDB's own paths
+        // (/dashboard*, /v1/*) so the SPA's relative assets + API calls resolve.
         .route("/api/admin/telemetry", get(routes::telemetry_info))
-        .route("/otel/{*path}", any(dashproxy::proxy))
+        .route("/dashboard", any(dashproxy::proxy))
+        .route("/dashboard/{*path}", any(dashproxy::proxy))
+        .route("/v1/{*path}", any(dashproxy::proxy))
         .route("/api/admin/recordings", get(recordings::list))
         .route(
             "/api/admin/recordings/{call_id}/{participant_id}",

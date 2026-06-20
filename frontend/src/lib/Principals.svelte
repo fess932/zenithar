@@ -40,7 +40,7 @@
   // telemetry dashboard (GreptimeDB), reverse-proxied on our own origin behind
   // admin auth — link shown only when export is enabled.
   let telemetry: TelemetryInfo = { enabled: false, port: 4000 };
-  const telemetryUrl = "/otel/dashboard";
+  const telemetryUrl = "/dashboard/"; // trailing slash → relative assets resolve
 
   onMount(refresh);
 

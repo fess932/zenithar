@@ -47,19 +47,19 @@ services:
     restart: unless-stopped
 
   # Metrics/traces store (started by default; remove this service to drop it).
-  # Single Rust-native binary (no Prometheus/Grafana/Loki); ingests OTLP and
-  # serves its own dashboard + SQL on http://<host>:4000/dashboard.
-  # NOTE: host networking + 0.0.0.0 exposes 4000 on every interface and
-  # GreptimeDB has no auth by default — firewall it or bind 127.0.0.1 if this
-  # host is public.
+  # Single Rust-native binary (no Prometheus/Grafana/Loki); ingests OTLP locally.
+  # Bound to 127.0.0.1 so :4000 is NOT exposed externally — zenithar (host net)
+  # reaches it locally for OTLP ingest, and the dashboard is served to admins via
+  # the cookie-gated /otel reverse proxy. GreptimeDB has no auth of its own, so
+  # keep these on loopback (don't switch to 0.0.0.0 without adding --user-provider).
   greptimedb:
     image: greptime/greptimedb:v1.1.1
     network_mode: host
     command:
       - standalone
       - start
-      - --http-addr=0.0.0.0:4000
-      - --rpc-bind-addr=0.0.0.0:4001
+      - --http-addr=127.0.0.1:4000
+      - --rpc-bind-addr=127.0.0.1:4001
       - --data-home=/greptimedb_data
     volumes:
       - /opt/zenithar/data/greptimedb:/greptimedb_data

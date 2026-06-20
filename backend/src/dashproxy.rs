@@ -1,38 +1,37 @@
 //! Admin-gated reverse proxy for the GreptimeDB dashboard, so telemetry lives on
-//! the main origin (`/otel/...`) instead of a separate `:4000` — and behind our
-//! session cookie (GreptimeDB itself has no auth). Only an admin's browser, which
-//! carries the session cookie, gets through the [`Admin`] extractor; every asset
-//! and API call the dashboard makes is same-origin, so the cookie rides along.
+//! the main origin (behind our session cookie — GreptimeDB itself has no auth)
+//! instead of a separate `:4000`. Only an admin's browser, which carries the
+//! session cookie, gets through the [`Admin`] extractor.
 //!
-//! The dashboard is an SPA, so we (a) inject a `<base href="/otel/">` into its
-//! HTML so relative assets resolve under the prefix, and (b) rewrite root-relative
-//! `Location` redirects back under `/otel`. Requests are forwarded to GreptimeDB's
-//! HTTP port, derived from `ZENITHAR_OTLP_ENDPOINT`.
+//! The dashboard is an SPA with RELATIVE asset paths (`assets/…`) served under
+//! `/dashboard/`, and it calls GreptimeDB's HTTP API under `/v1/…`. A custom URL
+//! prefix would break both (relative assets + absolute API). So instead of
+//! translating paths we MIRROR GreptimeDB's own paths on our origin: mount this
+//! at `/dashboard*` and `/v1/*` and forward the path unchanged — everything
+//! resolves the way the SPA expects, no `<base>` rewriting needed. Requests go to
+//! GreptimeDB's HTTP port, derived from `ZENITHAR_OTLP_ENDPOINT`.
 
 use std::sync::OnceLock;
 
 use axum::body::{to_bytes, Bytes};
 use axum::extract::Request;
-use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderName, StatusCode};
 use axum::response::{IntoResponse, Response};
 
 use crate::auth::Admin;
 
-const PREFIX: &str = "/otel";
 const MAX_BODY: usize = 32 * 1024 * 1024;
 
-/// `ANY /otel/{*path}` — forward to the GreptimeDB dashboard. Admin only.
+/// `ANY /dashboard*` and `/v1/*` — forward to GreptimeDB unchanged. Admin only.
 pub async fn proxy(_admin: Admin, req: Request) -> Response {
     let base = greptime_base();
     let path = req.uri().path();
-    let rest = path.strip_prefix(PREFIX).unwrap_or(path);
-    let rest = if rest.is_empty() { "/" } else { rest };
     let query = req
         .uri()
         .query()
         .map(|q| format!("?{q}"))
         .unwrap_or_default();
-    let url = format!("{base}{rest}{query}");
+    let url = format!("{base}{path}{query}");
 
     let method = req.method().clone();
     let headers = req.headers().clone();
@@ -56,47 +55,23 @@ pub async fn proxy(_admin: Admin, req: Request) -> Response {
 
     let status = resp.status();
     let mut out = HeaderMap::new();
-    let mut content_type = String::new();
     for (k, v) in resp.headers().iter() {
+        // Let axum set framing; copy everything else (incl. content-type, location).
         if is_hop(k) || k == header::CONTENT_LENGTH || k == header::TRANSFER_ENCODING {
             continue;
         }
-        if k == header::LOCATION {
-            // Keep redirects inside the /otel prefix.
-            if let Ok(s) = v.to_str() {
-                let nv = if s.starts_with('/') {
-                    format!("{PREFIX}{s}")
-                } else {
-                    s.to_string()
-                };
-                if let Ok(hv) = HeaderValue::from_str(&nv) {
-                    out.insert(header::LOCATION, hv);
-                }
-            }
-            continue;
-        }
-        if k == header::CONTENT_TYPE {
-            content_type = v.to_str().unwrap_or("").to_string();
-        }
         out.append(k.clone(), v.clone());
     }
+    let bytes: Bytes = resp.bytes().await.unwrap_or_default();
 
-    let bytes = resp.bytes().await.unwrap_or_default();
-    let body = if content_type.starts_with("text/html") {
-        let html = String::from_utf8_lossy(&bytes);
-        Bytes::from(html.replacen("<head>", &format!("<head><base href=\"{PREFIX}/\">"), 1))
-    } else {
-        bytes
-    };
-
-    (status, out, body).into_response()
+    (status, out, bytes).into_response()
 }
 
 fn client() -> &'static reqwest::Client {
     static C: OnceLock<reqwest::Client> = OnceLock::new();
     C.get_or_init(|| {
         reqwest::Client::builder()
-            // Pass redirects through to the browser (rewritten) instead of following.
+            // Pass redirects through to the browser (paths are already correct).
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .unwrap_or_default()
