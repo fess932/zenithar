@@ -297,6 +297,7 @@ async fn main() -> Result<()> {
         // (/dashboard*, /v1/*) so the SPA's relative assets + API calls resolve.
         .route("/api/admin/telemetry", get(routes::telemetry_info))
         .route("/dashboard", any(dashproxy::proxy))
+        .route("/dashboard/", any(dashproxy::proxy))
         .route("/dashboard/{*path}", any(dashproxy::proxy))
         .route("/v1/{*path}", any(dashproxy::proxy))
         .route("/api/admin/recordings", get(recordings::list))
