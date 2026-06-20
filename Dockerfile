@@ -17,12 +17,14 @@ RUN bun run build
 # 2. Backend: compile the release binary with the frontend embedded.
 FROM rust:1-slim-bookworm AS backend
 # build-essential: bundled SQLite (sqlx) + ring (DTLS). autotools/pkg-config:
-# audiopus_sys builds libopus from source (autogen.sh → configure → make) and
-# statically links it, so the distroless runtime needs nothing extra.
+# audiopus_sys builds libopus from source (autogen.sh → configure → make).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential autoconf automake libtool pkg-config \
     && rm -rf /var/lib/apt/lists/*
+# Force audiopus_sys to STATICALLY link libopus into the binary (its default is
+# a shared lib), so the distroless runtime needs no libopus.so.0.
+ENV LIBOPUS_STATIC=1
 WORKDIR /app/backend
 # Warm the dependency cache: build deps against a dummy main, so a code-only
 # change doesn't recompile the whole webrtc/sqlx tree.
