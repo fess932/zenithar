@@ -41,9 +41,11 @@ use rtc::sansio::Protocol;
 use rtc::shared::{TaggedBytesMut, TransportContext, TransportProtocol};
 
 use crate::models::{CallParticipant, Outbound, Signal};
+use mixer::Mixer;
 use peer::{audio_media_engine, opus_track};
 use recorder::Recorder;
 
+mod mixer;
 mod peer;
 mod recorder;
 
@@ -77,6 +79,7 @@ struct Call {
     signal: broadcast::Sender<Signal>,
     members: Mutex<HashMap<String, Member>>,
     recorder: Recorder,
+    mixer: Mixer,
 }
 
 impl Call {
@@ -208,6 +211,7 @@ impl CallRegistry {
                 let id = Ulid::new().to_string();
                 let call = Arc::new(Call {
                     recorder: Recorder::new(self.recordings_dir.clone(), &id),
+                    mixer: Mixer::new(self.recordings_dir.clone(), &id),
                     id,
                     room_id: room_id.to_string(),
                     signal: self.signal.clone(),
@@ -381,10 +385,11 @@ impl CallRegistry {
             let _ = tx.send(Cmd::Close); // close the lone straggler's server leg
         }
         let recorded = call.recorder.finalize();
+        let mixed = call.mixer.finalize();
         if let Err(e) = crate::db::end_call(&self.db, &call.id, crate::now_millis()).await {
             warn!(error = %e, "failed to log call end");
         }
-        if recorded {
+        if recorded || mixed {
             if let Err(e) = crate::db::set_call_recording(&self.db, &call.id, &call.id).await {
                 warn!(error = %e, "failed to record recording_id");
             }
@@ -461,6 +466,7 @@ impl Driver {
                         );
                     }
                     self.call.recorder.write(&self.my_id, &pkt);
+                    self.call.mixer.add(&self.my_id, &pkt.payload);
                     let pkt = Arc::new(pkt);
                     for tx in others {
                         let _ = tx.send(Cmd::Forward(pkt.clone()));

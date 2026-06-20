@@ -82,6 +82,23 @@
     pending = pending.filter((a) => a.id !== id);
   }
 
+  // Paste an image straight from the clipboard (e.g. a screenshot) — uploads it
+  // as an attachment instead of pasting garbage text. Mostly a desktop flow;
+  // mobile keyboards rarely expose images here, so phones use the 📎 button.
+  async function onPaste(e: ClipboardEvent): Promise<void> {
+    const items = Array.from(e.clipboardData?.items ?? []);
+    const images = items.filter((it) => it.kind === "file" && it.type.startsWith("image/"));
+    if (images.length === 0) return; // ordinary text paste — leave it alone
+    e.preventDefault();
+    for (const it of images) {
+      const blob = it.getAsFile();
+      if (!blob) continue;
+      const ext = (blob.type.split("/")[1] || "png").replace("jpeg", "jpg");
+      const file = new File([blob], `pasted-${Date.now()}.${ext}`, { type: blob.type });
+      await doUpload(file);
+    }
+  }
+
   // ---- voice ----------------------------------------------------------------
   async function startRecording(): Promise<void> {
     try {
@@ -251,6 +268,7 @@
 
       <input
         bind:value={body}
+        onpaste={onPaste}
         placeholder={uploading ? $t("uploading") : $t("messagePlaceholder")}
         aria-label={$t("messageAria")}
         maxlength="4000"

@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider as _;
-use opentelemetry_otlp::{SpanExporter, WithExportConfig};
+use opentelemetry_otlp::{SpanExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::Resource;
 use tracing_subscriber::prelude::*;
@@ -83,9 +83,20 @@ fn build_provider(endpoint: &str) -> anyhow::Result<SdkTracerProvider> {
     } else {
         format!("{}/v1/traces", endpoint.trim_end_matches('/'))
     };
+    // GreptimeDB requires these headers to accept OTLP traces (the pipeline name
+    // is mandatory; the db name defaults to `public`). They're harmless to a
+    // plain OTLP collector, which ignores unknown headers.
+    let headers = std::collections::HashMap::from([
+        (
+            "x-greptime-pipeline-name".to_string(),
+            "greptime_trace_v1".to_string(),
+        ),
+        ("x-greptime-db-name".to_string(), "public".to_string()),
+    ]);
     let exporter = SpanExporter::builder()
         .with_http()
         .with_endpoint(url)
+        .with_headers(headers)
         .with_timeout(Duration::from_secs(3))
         .build()?;
     let resource = Resource::builder().with_service_name(SERVICE_NAME).build();

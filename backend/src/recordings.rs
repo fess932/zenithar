@@ -48,18 +48,24 @@ pub async fn list(State(state): State<AppState>, _admin: Admin) -> Response {
     let views: Vec<RecordingView> = calls
         .into_iter()
         .map(|c| {
-            let tracks = by_call
-                .get(&c.call_id)
-                .map(|pids| {
-                    pids.iter()
-                        .map(|pid| Track {
-                            participant_name: names.get(pid).cloned().unwrap_or_else(|| pid.clone()),
-                            url: format!("/api/admin/recordings/{}/{}", c.call_id, pid),
-                            participant_id: pid.clone(),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+            // Prefer the single mixed file; fall back to per-track for old calls.
+            let tracks = match by_call.get(&c.call_id) {
+                Some(cf) if cf.mix => vec![Track {
+                    participant_id: "mix".to_string(),
+                    participant_name: String::new(), // one whole-call recording
+                    url: format!("/api/admin/recordings/{}/mix", c.call_id),
+                }],
+                Some(cf) => cf
+                    .parts
+                    .iter()
+                    .map(|pid| Track {
+                        participant_name: names.get(pid).cloned().unwrap_or_else(|| pid.clone()),
+                        url: format!("/api/admin/recordings/{}/{}", c.call_id, pid),
+                        participant_id: pid.clone(),
+                    })
+                    .collect(),
+                None => Vec::new(),
+            };
             RecordingView {
                 call_id: c.call_id,
                 room_title: c.room_title,
@@ -85,16 +91,20 @@ pub async fn serve(
     if !is_id(&call_id) || !is_id(&participant_id) {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    let path = state
-        .recordings_dir
-        .join(format!("{call_id}.{participant_id}.ogg"));
+    // "mix" → the single mixed WAV; otherwise a per-participant Ogg/Opus track.
+    let (file, content_type) = if participant_id == "mix" {
+        (format!("{call_id}.mix.wav"), "audio/wav")
+    } else {
+        (format!("{call_id}.{participant_id}.ogg"), "audio/ogg")
+    };
+    let path = state.recordings_dir.join(file);
     let bytes = match tokio::task::spawn_blocking(move || std::fs::read(path)).await {
         Ok(Ok(b)) => b,
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     (
         [
-            (header::CONTENT_TYPE, "audio/ogg".to_string()),
+            (header::CONTENT_TYPE, content_type.to_string()),
             (header::CACHE_CONTROL, "private, max-age=3600".to_string()),
         ],
         bytes,
@@ -102,20 +112,31 @@ pub async fn serve(
         .into_response()
 }
 
-/// Group the recordings dir into `call_id → [participant_id]` from the filenames.
-fn scan_tracks(dir: &Path) -> HashMap<String, Vec<String>> {
-    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+/// What's on disk for a call: the mixed WAV and/or the per-participant tracks.
+#[derive(Default)]
+struct CallFiles {
+    mix: bool,
+    parts: Vec<String>,
+}
+
+/// Group the recordings dir by `call_id`: `<call>.mix.wav` (mixed) and
+/// `<call>.<participant>.ogg` (per-track) from the filenames.
+fn scan_tracks(dir: &Path) -> HashMap<String, CallFiles> {
+    let mut map: HashMap<String, CallFiles> = HashMap::new();
     let Ok(entries) = std::fs::read_dir(dir) else {
         return map;
     };
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        // "<call_id>.<participant_id>.ogg" — both ids are dot-free ULIDs.
-        if let Some(stem) = name.strip_suffix(".ogg") {
+        if let Some(call_id) = name.strip_suffix(".mix.wav") {
+            map.entry(call_id.to_string()).or_default().mix = true;
+        } else if let Some(stem) = name.strip_suffix(".ogg") {
+            // "<call_id>.<participant_id>.ogg" — both ids are dot-free ULIDs.
             if let Some((call_id, participant_id)) = stem.split_once('.') {
                 map.entry(call_id.to_string())
                     .or_default()
+                    .parts
                     .push(participant_id.to_string());
             }
         }

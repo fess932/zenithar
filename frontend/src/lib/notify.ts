@@ -66,8 +66,10 @@ export function toggleMute(room_id: string): void {
 type ACtor = typeof AudioContext;
 let audioCtx: AudioContext | null = null;
 
-/// A short two-note chime, synthesized so we ship no audio asset (works offline).
-function chime(): void {
+/// A short chime, synthesized so we ship no audio asset (works offline). `soft`
+/// plays a quieter single low blip — for a message in the tab you're already
+/// looking at; the default two-note chime is for a backgrounded tab.
+function chime(soft = false): void {
   try {
     const Ctor: ACtor | undefined =
       window.AudioContext ??
@@ -78,20 +80,25 @@ function chime(): void {
     // Autoplay policy: the context starts suspended until a user gesture.
     if (ctx.state === "suspended") void ctx.resume();
     const now = ctx.currentTime;
+    const peak = soft ? 0.05 : 0.18;
     const note = (freq: number, start: number, dur: number): void => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = "sine";
       osc.frequency.value = freq;
       gain.gain.setValueAtTime(0.0001, now + start);
-      gain.gain.exponentialRampToValueAtTime(0.18, now + start + 0.012);
+      gain.gain.exponentialRampToValueAtTime(peak, now + start + 0.012);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
       osc.connect(gain).connect(ctx.destination);
       osc.start(now + start);
       osc.stop(now + start + dur);
     };
-    note(880, 0, 0.12); // A5
-    note(1318.5, 0.1, 0.16); // E6
+    if (soft) {
+      note(587.33, 0, 0.1); // D5 — single soft blip
+    } else {
+      note(880, 0, 0.12); // A5
+      note(1318.5, 0.1, 0.16); // E6
+    }
   } catch {
     /* no audio available — visual notification still fires */
   }
@@ -149,14 +156,13 @@ export function initNotifications(): void {
     pushToast(n);
   });
 
-  // Chime on an incoming reply in the room you're viewing — but only while the
-  // tab is in the background (foreground = you can already see it). This is what
-  // gives an anonymous client a sound when an employee answers, mirroring the
-  // employee-side ping. Skips your own echoed message and muted rooms.
+  // Chime on an incoming message in the room you're viewing: a quiet blip when
+  // the tab is foreground (you can see it, just a nudge), the full chime when
+  // it's backgrounded. This also gives an anonymous client a sound when an
+  // employee answers. Skips your own echoed message and muted rooms.
   onIncoming((m) => {
-    if (document.visibilityState === "visible") return;
     if (m.author_id === get(me)?.id) return;
     if (isMuted(m.room_id)) return;
-    chime();
+    chime(document.visibilityState === "visible");
   });
 }

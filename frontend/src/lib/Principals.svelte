@@ -351,7 +351,9 @@
               <div class="flex flex-col gap-2">
                 {#each rec.tracks as tr (tr.participant_id)}
                   <div class="flex flex-col gap-1">
-                    <span class="font-mono text-[0.72rem] text-muted">🎙 {tr.participant_name}</span>
+                    {#if tr.participant_id !== "mix"}
+                      <span class="font-mono text-[0.72rem] text-muted">🎙 {tr.participant_name}</span>
+                    {/if}
                     <VoicePlayer src={tr.url} />
                   </div>
                 {/each}
