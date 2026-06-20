@@ -42,7 +42,9 @@ pub async fn list(State(state): State<AppState>, _admin: Admin) -> Response {
     let Ok(calls) = db::list_recorded_calls(&state.reads).await else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
-    let names = db::all_principal_names(&state.reads).await.unwrap_or_default();
+    let names = db::all_principal_names(&state.reads)
+        .await
+        .unwrap_or_default();
     let by_call = scan_tracks(&state.recordings_dir);
 
     let views: Vec<RecordingView> = calls
@@ -91,11 +93,11 @@ pub async fn serve(
     if !is_id(&call_id) || !is_id(&participant_id) {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    // "mix" → the single mixed WAV; otherwise a per-participant Ogg/Opus track.
-    let (file, content_type) = if participant_id == "mix" {
-        (format!("{call_id}.mix.wav"), "audio/wav")
+    // "mix" → the single mixed file; otherwise a per-participant track. Both Opus.
+    let file = if participant_id == "mix" {
+        format!("{call_id}.mix.ogg")
     } else {
-        (format!("{call_id}.{participant_id}.ogg"), "audio/ogg")
+        format!("{call_id}.{participant_id}.ogg")
     };
     let path = state.recordings_dir.join(file);
     let bytes = match tokio::task::spawn_blocking(move || std::fs::read(path)).await {
@@ -104,7 +106,7 @@ pub async fn serve(
     };
     (
         [
-            (header::CONTENT_TYPE, content_type.to_string()),
+            (header::CONTENT_TYPE, "audio/ogg".to_string()),
             (header::CACHE_CONTROL, "private, max-age=3600".to_string()),
         ],
         bytes,
@@ -112,14 +114,14 @@ pub async fn serve(
         .into_response()
 }
 
-/// What's on disk for a call: the mixed WAV and/or the per-participant tracks.
+/// What's on disk for a call: the mixed file and/or the per-participant tracks.
 #[derive(Default)]
 struct CallFiles {
     mix: bool,
     parts: Vec<String>,
 }
 
-/// Group the recordings dir by `call_id`: `<call>.mix.wav` (mixed) and
+/// Group the recordings dir by `call_id`: `<call>.mix.ogg` (mixed) and
 /// `<call>.<participant>.ogg` (per-track) from the filenames.
 fn scan_tracks(dir: &Path) -> HashMap<String, CallFiles> {
     let mut map: HashMap<String, CallFiles> = HashMap::new();
@@ -129,7 +131,7 @@ fn scan_tracks(dir: &Path) -> HashMap<String, CallFiles> {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        if let Some(call_id) = name.strip_suffix(".mix.wav") {
+        if let Some(call_id) = name.strip_suffix(".mix.ogg") {
             map.entry(call_id.to_string()).or_default().mix = true;
         } else if let Some(stem) = name.strip_suffix(".ogg") {
             // "<call_id>.<participant_id>.ogg" — both ids are dot-free ULIDs.

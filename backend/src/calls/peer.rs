@@ -8,8 +8,8 @@
 #![allow(dead_code)]
 
 use anyhow::Result;
-use rtc::peer_connection::configuration::media_engine::{MediaEngine, MIME_TYPE_OPUS};
 use rtc::media_stream::MediaStreamTrack;
+use rtc::peer_connection::configuration::media_engine::{MediaEngine, MIME_TYPE_OPUS};
 use rtc::rtp_transceiver::rtp_sender::{
     RTCRtpCodec, RTCRtpCodecParameters, RTCRtpCodingParameters, RTCRtpEncodingParameters,
     RtpCodecKind,
@@ -144,10 +144,14 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline && received < 5 {
             while let Some(msg) = Protocol::poll_write(&mut offerer) {
-                let _ = off_sock.send_to(&msg.message, msg.transport.peer_addr).await;
+                let _ = off_sock
+                    .send_to(&msg.message, msg.transport.peer_addr)
+                    .await;
             }
             while let Some(msg) = Protocol::poll_write(&mut answerer) {
-                let _ = ans_sock.send_to(&msg.message, msg.transport.peer_addr).await;
+                let _ = ans_sock
+                    .send_to(&msg.message, msg.transport.peer_addr)
+                    .await;
             }
 
             while let Some(ev) = Protocol::poll_event(&mut offerer) {
@@ -228,7 +232,11 @@ mod tests {
         Ok(())
     }
 
-    fn tagged(buf: &[u8], local: std::net::SocketAddr, peer: std::net::SocketAddr) -> TaggedBytesMut {
+    fn tagged(
+        buf: &[u8],
+        local: std::net::SocketAddr,
+        peer: std::net::SocketAddr,
+    ) -> TaggedBytesMut {
         TaggedBytesMut {
             now: Instant::now(),
             transport: TransportContext {

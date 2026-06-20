@@ -16,9 +16,12 @@ RUN bun run build
 
 # 2. Backend: compile the release binary with the frontend embedded.
 FROM rust:1-slim-bookworm AS backend
-# cc/gcc are needed to compile the bundled SQLite (sqlx) and ring (webrtc DTLS).
+# build-essential: bundled SQLite (sqlx) + ring (DTLS). autotools/pkg-config:
+# audiopus_sys builds libopus from source (autogen.sh → configure → make) and
+# statically links it, so the distroless runtime needs nothing extra.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential \
+    && apt-get install -y --no-install-recommends \
+        build-essential autoconf automake libtool pkg-config \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app/backend
 # Warm the dependency cache: build deps against a dummy main, so a code-only

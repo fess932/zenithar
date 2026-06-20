@@ -222,9 +222,14 @@ impl CallRegistry {
             }
         };
         if created {
-            if let Err(e) =
-                crate::db::insert_call(&self.db, &call.id, room_id, principal_id, crate::now_millis())
-                    .await
+            if let Err(e) = crate::db::insert_call(
+                &self.db,
+                &call.id,
+                room_id,
+                principal_id,
+                crate::now_millis(),
+            )
+            .await
             {
                 warn!(error = %e, "failed to log call start");
             }
@@ -246,7 +251,11 @@ impl CallRegistry {
 
         // The track this participant *receives* (everyone else's audio).
         let ssrc = u32::from_le_bytes(crate::auth::random_bytes::<4>());
-        let sender_id = pc.add_track(opus_track("zenithar", &format!("voice-{principal_id}"), ssrc))?;
+        let sender_id = pc.add_track(opus_track(
+            "zenithar",
+            &format!("voice-{principal_id}"),
+            ssrc,
+        ))?;
 
         // Advertise our reachable host candidate (public IP in prod, loopback in
         // dev) on the bound port. It rides in the offer SDP, so the client gets it
@@ -434,7 +443,10 @@ impl Driver {
         'drive: loop {
             // 1. Flush outgoing UDP.
             while let Some(msg) = self.pc.poll_write() {
-                let _ = self.socket.send_to(&msg.message, msg.transport.peer_addr).await;
+                let _ = self
+                    .socket
+                    .send_to(&msg.message, msg.transport.peer_addr)
+                    .await;
             }
 
             // 2. State events.

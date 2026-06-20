@@ -217,18 +217,16 @@ async fn main() -> Result<()> {
     // Fixed UDP port range for call media (one socket per participant, bound
     // 0.0.0.0). Forward exactly this range in the NAT/DMZ. Empty = ephemeral.
     // Accepts a range ("51000-51200") or a bare port ("51000" → 51000-51000).
-    let udp_ports: Option<(u16, u16)> = std::env::var("ZENITHAR_UDP_PORTS")
-        .ok()
-        .and_then(|v| {
-            let v = v.trim();
-            match v.split_once('-') {
-                Some((a, b)) => Some((a.trim().parse().ok()?, b.trim().parse().ok()?)),
-                None => {
-                    let p: u16 = v.parse().ok()?;
-                    Some((p, p))
-                }
+    let udp_ports: Option<(u16, u16)> = std::env::var("ZENITHAR_UDP_PORTS").ok().and_then(|v| {
+        let v = v.trim();
+        match v.split_once('-') {
+            Some((a, b)) => Some((a.trim().parse().ok()?, b.trim().parse().ok()?)),
+            None => {
+                let p: u16 = v.parse().ok()?;
+                Some((p, p))
             }
-        });
+        }
+    });
     // Call recordings (Phase 5): one Ogg/Opus file per participant, on disk.
     let recordings_dir = std::env::var("ZENITHAR_RECORDINGS")
         .map(std::path::PathBuf::from)

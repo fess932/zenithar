@@ -50,7 +50,9 @@ pub async fn proxy(_admin: Admin, req: Request) -> Response {
 
     let resp = match rb.send().await {
         Ok(r) => r,
-        Err(_) => return (StatusCode::BAD_GATEWAY, "telemetry backend unavailable").into_response(),
+        Err(_) => {
+            return (StatusCode::BAD_GATEWAY, "telemetry backend unavailable").into_response()
+        }
     };
 
     let status = resp.status();

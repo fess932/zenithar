@@ -66,9 +66,12 @@ impl Mixer {
         let inner = &mut *guard;
         let pos = inner.start.elapsed().as_millis() as usize * RATE / 1000;
 
-        let dec = inner.decoders.entry(participant.to_string()).or_insert_with(|| {
-            Decoder::new(SampleRate::Hz48000, Channels::Stereo).expect("opus stereo decoder")
-        });
+        let dec = inner
+            .decoders
+            .entry(participant.to_string())
+            .or_insert_with(|| {
+                Decoder::new(SampleRate::Hz48000, Channels::Stereo).expect("opus stereo decoder")
+            });
         // Interleaved L/R out; decode returns samples PER CHANNEL.
         let mut out = [0i16; MAX_FRAME * 2];
         let n = match dec.decode(Some(opus), &mut out[..], false) {
