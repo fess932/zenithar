@@ -32,7 +32,7 @@
     toggleMute,
   } from "./notify";
   import { me } from "./session";
-  import { t } from "./i18n";
+  import { t, lang } from "./i18n";
 
   let logEl: HTMLElement;
   let pinned = true;
@@ -40,6 +40,26 @@
   let drawerOpen = false;
 
   $: isEmployee = $me?.kind === "user";
+
+  // Telegram-style day dividers: a label before the first message of each day.
+  function sameDay(a: number, b: number): boolean {
+    const x = new Date(a);
+    const y = new Date(b);
+    return (
+      x.getFullYear() === y.getFullYear() &&
+      x.getMonth() === y.getMonth() &&
+      x.getDate() === y.getDate()
+    );
+  }
+  function dayLabel(ms: number): string {
+    const now = Date.now();
+    if (sameDay(ms, now)) return $t("today");
+    if (sameDay(ms, now - 86400000)) return $t("yesterday");
+    const d = new Date(ms);
+    const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "long" };
+    if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+    return d.toLocaleDateString($lang === "ru" ? "ru-RU" : "en-US", opts);
+  }
 
   onMount(() => {
     connect();
@@ -115,7 +135,16 @@
       {#if $messages.length === 0}
         <p class="px-6 py-10 font-mono text-[0.82rem] text-muted">{$t("empty")}</p>
       {:else}
-        {#each $messages as m (m.id)}
+        {#each $messages as m, i (m.id)}
+          {#if i === 0 || !sameDay($messages[i - 1].created_at, m.created_at)}
+            <div class="my-2 flex justify-center">
+              <span
+                class="rounded-full bg-surface-2 px-3 py-0.5 font-mono text-[0.7rem] text-muted"
+              >
+                {dayLabel(m.created_at)}
+              </span>
+            </div>
+          {/if}
           <Message {m} />
         {/each}
       {/if}
