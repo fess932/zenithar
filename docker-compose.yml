@@ -1,6 +1,7 @@
 services:
   zenithar:
-    build: .
+    # Deploy-only: the image is built + pushed by CI (GitHub → GHCR). Pull it,
+    # don't build locally:  docker compose up -d --pull always --force-recreate
     image: ghcr.io/fess932/zenithar:latest
     # --- Networking for voice calls --------------------------------------------
     # Call MEDIA is UDP: ONE socket per participant, each bound to 0.0.0.0 on a
