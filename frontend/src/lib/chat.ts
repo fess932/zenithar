@@ -112,6 +112,12 @@ export const status = writable<Status>("connecting");
 export const rooms = writable<RoomSummary[]>([]);
 export const activeRoom = writable<string | null>(null);
 
+// Older-history pagination (lazy load on scroll-up). `hasMoreHistory` flips false
+// once a short page comes back; `loadingOlder` guards against concurrent loads.
+const HISTORY_PAGE = 50;
+export const hasMoreHistory = writable(true);
+let loadingOlder = false;
+
 // Remember the open room across reloads: persist whenever it changes, and rejoin
 // it on (re)connect if it still exists (the server falls back to the default room
 // otherwise). Lets a refresh keep you where you were.
@@ -213,7 +219,9 @@ export function connect(): void {
       const room = (f as { room_id: string }).room_id;
       activeRoom.set(room);
       clearUnread(room); // viewing it now → no longer unread
-      messages.set((f as { messages: ChatMessage[] }).messages);
+      const msgs = (f as { messages: ChatMessage[] }).messages;
+      messages.set(msgs);
+      hasMoreHistory.set(msgs.length >= HISTORY_PAGE); // a full page → maybe more
     } else if (f.type === "message") {
       const msg = (f as { message: ChatMessage }).message;
       if (msg.room_id !== get(activeRoom)) return; // not the open room
@@ -339,5 +347,30 @@ export async function loadRooms(): Promise<void> {
     rooms.set(r.ok ? ((await r.json()) as RoomSummary[]) : []);
   } catch {
     rooms.set([]);
+  }
+}
+
+/// Fetch a page of messages older than what's loaded and prepend them. Returns
+/// how many were added (0 = nothing older / not applicable). Drives lazy
+/// scroll-up loading in the chat.
+export async function loadOlder(): Promise<number> {
+  if (loadingOlder || !get(hasMoreHistory)) return 0;
+  const room = get(activeRoom);
+  const oldest = get(messages)[0]?.id;
+  if (!room || !oldest) return 0;
+  loadingOlder = true;
+  try {
+    const r = await fetch(`/api/rooms/${room}/messages?before=${oldest}&limit=${HISTORY_PAGE}`);
+    if (!r.ok) return 0;
+    const older = (await r.json()) as ChatMessage[]; // oldest-first
+    if (older.length < HISTORY_PAGE) hasMoreHistory.set(false);
+    // Room may have changed while the request was in flight.
+    if (older.length === 0 || get(activeRoom) !== room) return 0;
+    messages.update((all) => [...older, ...all]);
+    return older.length;
+  } catch {
+    return 0;
+  } finally {
+    loadingOlder = false;
   }
 }

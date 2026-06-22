@@ -1,7 +1,7 @@
 //! HTTP routes for auth and admin: link login, session, self-rename, and
 //! principal (link) management.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -154,6 +154,40 @@ pub async fn rooms(
         }]
     };
     Ok(Json(list))
+}
+
+#[derive(Deserialize)]
+pub struct HistoryQuery {
+    #[serde(default)]
+    pub before: Option<String>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// `GET /api/rooms/:id/messages?before&limit` — a page of older messages for the
+/// browser (cookie auth), oldest-first. Lets the chat lazily load history when
+/// scrolled up; `before` is the oldest message id the client already has.
+pub async fn room_messages(
+    State(state): State<AppState>,
+    Identity(p): Identity,
+    Path(room_id): Path<String>,
+    Query(q): Query<HistoryQuery>,
+) -> Response {
+    let allowed = if auth::is_staff(&p.kind) {
+        db::room_exists(&state.reads, &room_id)
+            .await
+            .unwrap_or(false)
+    } else {
+        matches!(db::room_of_client(&state.reads, &p.id).await, Ok(Some(r)) if r == room_id)
+    };
+    if !allowed {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let limit = q.limit.unwrap_or(50).clamp(1, 100);
+    match db::messages_before(&state.reads, &room_id, limit, q.before.as_deref()).await {
+        Ok(msgs) => Json(msgs).into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
 }
 
 // ---- admin: principals (links) ---------------------------------------------

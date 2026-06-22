@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, afterUpdate } from "svelte";
+  import { onMount, afterUpdate, tick } from "svelte";
   import Header from "./Header.svelte";
   import Composer from "./Composer.svelte";
   import Message from "./Message.svelte";
@@ -21,6 +21,7 @@
     dismissNotice,
     unread,
     online,
+    loadOlder,
     type RoomSummary,
   } from "./chat";
   import {
@@ -70,9 +71,22 @@
 
   $: totalUnread = Object.values($unread).reduce((a, b) => a + b, 0);
 
-  function onScroll(): void {
+  let loadingMore = false;
+
+  async function onScroll(): Promise<void> {
     pinned = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 80;
     closeMessageMenu(); // a floating menu shouldn't trail the scroll
+    // Near the top → lazily load older history, keeping the viewport stable.
+    if (logEl.scrollTop < 120 && !loadingMore) {
+      loadingMore = true;
+      const prevHeight = logEl.scrollHeight;
+      const added = await loadOlder();
+      if (added > 0) {
+        await tick(); // wait for the prepended messages to render
+        logEl.scrollTop = logEl.scrollHeight - prevHeight; // restore position
+      }
+      loadingMore = false;
+    }
   }
 
   function scrollToBottom(): void {
