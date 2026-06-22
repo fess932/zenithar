@@ -129,7 +129,9 @@ impl Call {
 pub struct CallRegistry {
     stun: Vec<String>,
     /// Public IP(s) to advertise as our host candidate (NAT/DMZ). First is used.
-    public_ips: Vec<String>,
+    /// Mutable so a background task can fill/refresh it via an external IP service
+    /// when `ZENITHAR_PUBLIC_IP` isn't set.
+    public_ips: Mutex<Vec<String>>,
     /// Fixed UDP port range to bind media on (forwarded 1:1 in the router). None
     /// = ephemeral. We allocate one socket per participant from this range.
     udp_ports: Option<(u16, u16)>,
@@ -153,7 +155,7 @@ impl CallRegistry {
         let next_port = udp_ports.map(|(lo, _)| lo).unwrap_or(0);
         Ok(Self {
             stun,
-            public_ips,
+            public_ips: Mutex::new(public_ips),
             udp_ports,
             next_port: Mutex::new(next_port),
             signal,
@@ -161,6 +163,21 @@ impl CallRegistry {
             recordings_dir,
             calls: Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Replace the advertised public IP(s) (used by the auto-discovery task when
+    /// `ZENITHAR_PUBLIC_IP` is unset). Affects calls started after this point.
+    pub fn set_public_ips(&self, ips: Vec<String>) {
+        let mut cur = self.public_ips.lock().unwrap();
+        if *cur != ips {
+            info!(?ips, "public IP updated (auto-discovered)");
+            *cur = ips;
+        }
+    }
+
+    /// Whether a public IP is currently known (else calls fall back to 127.0.0.1).
+    pub fn has_public_ip(&self) -> bool {
+        !self.public_ips.lock().unwrap().is_empty()
     }
 
     fn ice_servers(&self) -> Vec<RTCIceServer> {
@@ -288,6 +305,8 @@ impl CallRegistry {
         // ("not a valid local candidate").
         let adv_ip = self
             .public_ips
+            .lock()
+            .unwrap()
             .first()
             .cloned()
             .unwrap_or_else(|| "127.0.0.1".to_string());
@@ -616,6 +635,22 @@ impl Driver {
 }
 
 /// Build an ICE host candidate (as `RTCIceCandidateInit`) for `ip:port`.
+/// Ask an external echo service for our public IP (plain-HTTP so it works with
+/// our TLS-less reqwest). Returns the IP only if the body parses as one.
+pub async fn discover_public_ip(service: &str) -> Option<String> {
+    let resp = reqwest::Client::new()
+        .get(service)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .ok()?;
+    let body = resp.bytes().await.ok()?;
+    let ip = String::from_utf8_lossy(&body);
+    let ip = ip.trim();
+    ip.parse::<std::net::IpAddr>().ok()?;
+    Some(ip.to_string())
+}
+
 fn host_candidate(ip: &str, port: u16) -> Result<RTCIceCandidateInit> {
     let cand = CandidateHostConfig {
         base_config: CandidateConfig {

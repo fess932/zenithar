@@ -243,6 +243,49 @@ async fn main() -> Result<()> {
         recordings_dir.clone(),
     )?);
 
+    // No static ZENITHAR_PUBLIC_IP? Auto-discover it from an external echo service
+    // and refresh periodically (handles a dynamic IP). Plain-HTTP service so it
+    // works with our TLS-less HTTP client; override with ZENITHAR_PUBLIC_IP_SERVICE.
+    if !calls.has_public_ip() {
+        let reg = calls.clone();
+        let service = std::env::var("ZENITHAR_PUBLIC_IP_SERVICE")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "http://api.ipify.org".to_string());
+        // Re-check this often (seconds) so a router-reboot IP change is picked up.
+        let interval = std::env::var("ZENITHAR_PUBLIC_IP_INTERVAL")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&n| n >= 10)
+            .unwrap_or(300);
+        tokio::spawn(async move {
+            loop {
+                match calls::discover_public_ip(&service).await {
+                    Some(ip) => reg.set_public_ips(vec![ip]), // only changes on diff
+                    None => info!(%service, "public IP discovery failed (will retry)"),
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+            }
+        });
+    }
+
+    // Presence, seeded with persisted last-seen so a restart doesn't show dashes.
+    let presence = Arc::new(presence::PresenceRegistry::new());
+    if let Ok(map) = db::load_last_seen(&reads).await {
+        presence.seed_last_seen(map);
+    }
+    // Periodically persist last-seen so it survives a restart/redeploy.
+    {
+        let presence = presence.clone();
+        let db = write_pool.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                let _ = db::save_last_seen(&db, &presence.last_seen_map()).await;
+            }
+        });
+    }
+
     let state = AppState {
         writes: write_tx,
         broadcast: broadcast_tx,
@@ -252,7 +295,7 @@ async fn main() -> Result<()> {
         signal: signal_tx,
         calls,
         notify: notify_tx,
-        presence: Arc::new(presence::PresenceRegistry::new()),
+        presence,
         limits: Arc::new(ratelimit::Limits::default()),
         secure_cookies,
         recordings_dir,

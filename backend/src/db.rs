@@ -431,6 +431,36 @@ pub async fn list_recorded_calls(reads: &SqlitePool) -> sqlx::Result<Vec<Recorde
     .await
 }
 
+/// Persisted last-seen times (`principal_id → unix millis`), loaded on startup to
+/// seed the in-memory presence registry so a restart doesn't lose the data.
+pub async fn load_last_seen(
+    reads: &SqlitePool,
+) -> sqlx::Result<std::collections::HashMap<String, i64>> {
+    let rows: Vec<(String, i64)> = sqlx::query_as("SELECT principal_id, ts FROM last_seen")
+        .fetch_all(reads)
+        .await?;
+    Ok(rows.into_iter().collect())
+}
+
+/// Persist the whole last-seen map (small: one row per principal). Called
+/// periodically and best-effort, so it survives a restart/redeploy.
+pub async fn save_last_seen(
+    write: &SqlitePool,
+    map: &std::collections::HashMap<String, i64>,
+) -> sqlx::Result<()> {
+    for (id, ts) in map {
+        sqlx::query(
+            "INSERT INTO last_seen (principal_id, ts) VALUES (?1, ?2)
+             ON CONFLICT(principal_id) DO UPDATE SET ts = ?2",
+        )
+        .bind(id)
+        .bind(ts)
+        .execute(write)
+        .await?;
+    }
+    Ok(())
+}
+
 /// Everyone in the connections list: human principals (employees + clients),
 /// not integration bots. Online status + last-seen are overlaid from presence.
 pub async fn list_people(reads: &SqlitePool) -> sqlx::Result<Vec<(String, String, String)>> {

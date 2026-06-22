@@ -56,6 +56,15 @@ impl PresenceRegistry {
         self.last_seen.lock().unwrap().clone()
     }
 
+    /// Pre-load persisted last-seen times on startup (doesn't overwrite anything
+    /// already touched this session).
+    pub fn seed_last_seen(&self, map: HashMap<String, i64>) {
+        let mut cur = self.last_seen.lock().unwrap();
+        for (id, ts) in map {
+            cur.entry(id).or_insert(ts);
+        }
+    }
+
     /// Whether a principal has at least one live connection right now.
     pub fn is_online(&self, id: &str) -> bool {
         self.online.lock().unwrap().contains_key(id)

@@ -33,7 +33,13 @@ services:
       # ZENITHAR_SECURE_COOKIES: "1"
       # STUN for WebRTC ICE (comma-separated). Empty works on a LAN/localhost.
       ZENITHAR_STUN: ""
-      ZENITHAR_PUBLIC_IP: "<external ip>"
+      # Public IP advertised as the WebRTC host candidate. LEAVE UNSET for a
+      # dynamic IP — the server then auto-discovers it from an external echo
+      # service and re-checks periodically (picks up a router-reboot change).
+      # Set it only to pin a STATIC IP (disables auto-discovery).
+      # ZENITHAR_PUBLIC_IP: "203.0.113.10"
+      # ZENITHAR_PUBLIC_IP_SERVICE: "http://api.ipify.org"  # echo service (plain HTTP)
+      # ZENITHAR_PUBLIC_IP_INTERVAL: "300"                  # re-check seconds (min 10)
       # Media UDP port RANGE — one socket per participant. Forward this whole
       # range in the router. Avoid ports in use (e.g. WireGuard on 50000/50001).
       ZENITHAR_UDP_PORTS: "51000-51200"

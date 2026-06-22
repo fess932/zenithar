@@ -105,3 +105,10 @@ CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
 INSERT INTO rooms (id, kind, created_at)
 VALUES ('common', 'common', 0)
 ON CONFLICT(id) DO NOTHING;
+
+-- Last-seen per principal (presence "ping"), persisted so the connections list
+-- survives a server restart instead of showing a dash.
+CREATE TABLE IF NOT EXISTS last_seen (
+    principal_id TEXT PRIMARY KEY,
+    ts           INTEGER NOT NULL   -- unix millis of last activity
+);
