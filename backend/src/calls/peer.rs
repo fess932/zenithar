@@ -12,13 +12,19 @@ use rtc::media_stream::MediaStreamTrack;
 use rtc::peer_connection::configuration::media_engine::{MediaEngine, MIME_TYPE_OPUS};
 use rtc::rtp_transceiver::rtp_sender::{
     RTCRtpCodec, RTCRtpCodecParameters, RTCRtpCodingParameters, RTCRtpEncodingParameters,
-    RtpCodecKind,
+    RTCRtpHeaderExtensionCapability, RtpCodecKind,
 };
 
 /// Opus is the only codec we negotiate (voice-only calls).
 pub(crate) const OPUS_PAYLOAD_TYPE: u8 = 111;
 pub(crate) const OPUS_CLOCK_RATE: u32 = 48_000;
 pub(crate) const OPUS_CHANNELS: u16 = 2;
+
+/// RFC 8843 media-identification header extension. With BUNDLE (all tracks on one
+/// transport) the browser demultiplexes inbound RTP onto the right `<audio>` track
+/// by this MID; we must register it AND stamp it on every forwarded packet, or
+/// multi-track (group) calls silently fail to route (1:1 works without it).
+pub(crate) const SDES_MID_URI: &str = "urn:ietf:params:rtp-hdrext:sdes:mid";
 
 /// The Opus codec parameters used on every call.
 pub(crate) fn opus_codec() -> RTCRtpCodecParameters {
@@ -34,11 +40,45 @@ pub(crate) fn opus_codec() -> RTCRtpCodecParameters {
     }
 }
 
-/// A media engine registered for Opus audio only.
+/// A media engine registered for Opus audio + the MID header extension (so the
+/// offer advertises `extmap` for it and BUNDLE demux can work — see SDES_MID_URI).
 pub(crate) fn audio_media_engine() -> Result<MediaEngine> {
     let mut me = MediaEngine::default();
     me.register_codec(opus_codec(), RtpCodecKind::Audio)?;
+    me.register_header_extension(
+        RTCRtpHeaderExtensionCapability {
+            uri: SDES_MID_URI.to_owned(),
+        },
+        RtpCodecKind::Audio,
+        None,
+    )?;
     Ok(me)
+}
+
+/// Parse our own offer SDP for the negotiated MID header-extension id and each
+/// audio m-line's MID, in m-line order. Track slot `i` (the i-th `add_track`)
+/// maps to the i-th audio m-line, so `mids[i]` is the MID to stamp for slot `i`.
+pub(crate) fn parse_mid_layout(sdp: &str) -> (Option<u8>, Vec<String>) {
+    let mut ext_id = None;
+    let mut mids = Vec::new();
+    for line in sdp.lines() {
+        let line = line.trim();
+        if ext_id.is_none() {
+            if let Some(rest) = line.strip_prefix("a=extmap:") {
+                // "<id>[/<direction>] <uri>"
+                if rest.contains(SDES_MID_URI) {
+                    if let Some(tok) = rest.split_whitespace().next() {
+                        let tok = tok.split('/').next().unwrap_or(tok);
+                        ext_id = tok.parse::<u8>().ok();
+                    }
+                }
+            }
+        }
+        if let Some(mid) = line.strip_prefix("a=mid:") {
+            mids.push(mid.to_string());
+        }
+    }
+    (ext_id, mids)
 }
 
 /// An outbound Opus audio track for the server to send one participant's audio
@@ -229,6 +269,35 @@ mod tests {
 
         assert!(off_connected && ans_connected, "peers should connect");
         assert!(received >= 1, "answerer should receive forwarded Opus RTP");
+        Ok(())
+    }
+
+    /// The offer must advertise the MID extmap (so BUNDLE demux can work) and
+    /// `parse_mid_layout` must recover the id + one MID per outbound track, in
+    /// order. This is what lets group calls route audio; the live browser-side
+    /// demux is verified on a real deploy.
+    #[test]
+    fn offer_advertises_mid_and_layout_parses() -> Result<()> {
+        let mut pc = RTCPeerConnectionBuilder::new()
+            .with_configuration(RTCConfigurationBuilder::new().build())
+            .with_media_engine(audio_media_engine()?)
+            .build()?;
+        let tracks = 8;
+        for i in 0..tracks {
+            pc.add_track(opus_track(
+                &format!("z-{i}"),
+                &format!("voice-{i}"),
+                1000 + i,
+            ))?;
+        }
+        let offer = pc.create_offer(None)?;
+        assert!(
+            offer.sdp.contains(SDES_MID_URI),
+            "offer must carry the MID extmap"
+        );
+        let (ext_id, mids) = parse_mid_layout(&offer.sdp);
+        assert!(ext_id.is_some(), "MID extension id must be negotiated");
+        assert_eq!(mids.len(), tracks as usize, "one MID per audio m-line");
         Ok(())
     }
 

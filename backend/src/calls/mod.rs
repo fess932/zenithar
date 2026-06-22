@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use tokio::net::UdpSocket;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
@@ -42,7 +42,7 @@ use rtc::shared::{TaggedBytesMut, TransportContext, TransportProtocol};
 
 use crate::models::{CallParticipant, Outbound, Signal};
 use mixer::Mixer;
-use peer::{audio_media_engine, opus_track};
+use peer::{audio_media_engine, opus_track, parse_mid_layout};
 use recorder::Recorder;
 
 mod mixer;
@@ -325,6 +325,31 @@ impl CallRegistry {
         let offer_sdp = offer.sdp.clone();
         pc.set_local_description(offer)?;
 
+        // Map slot i (the i-th add_track) → its m-line MID, and grab the negotiated
+        // MID extension id, both parsed from our own offer. We stamp these on
+        // forwarded packets so the receiver's BUNDLE demux routes each source to
+        // its own track (see SDES_MID_URI in peer.rs).
+        let (mid_ext_id, slot_mids) = parse_mid_layout(&offer_sdp);
+        match mid_ext_id {
+            Some(id) if slot_mids.len() >= FORWARD_TRACKS => {
+                info!(
+                    participant = %principal_id,
+                    mid_ext_id = id,
+                    slots = slot_mids.len(),
+                    "MID stamping active (group-call demux)"
+                );
+            }
+            _ => {
+                warn!(
+                    participant = %principal_id,
+                    ?mid_ext_id,
+                    mids = slot_mids.len(),
+                    tracks = FORWARD_TRACKS,
+                    "MID layout incomplete — group-call audio demux may fail"
+                );
+            }
+        }
+
         // Register the participant and spawn its driver.
         let (tx, rx) = mpsc::unbounded_channel();
         call.members.lock().unwrap().insert(
@@ -348,6 +373,8 @@ impl CallRegistry {
                 senders,
                 send_ssrcs,
                 slots: HashMap::new(),
+                mid_ext_id,
+                slot_mids,
                 rx,
                 logged_peer: false,
                 logged_rtp_in: false,
@@ -467,6 +494,11 @@ struct Driver {
     send_ssrcs: Vec<u32>,
     /// Which outbound track slot each source participant is forwarded on.
     slots: HashMap<String, usize>,
+    /// Negotiated MID header-extension id, and the MID per slot (= per outbound
+    /// track). Stamped on each forwarded packet so the browser demuxes it onto the
+    /// right `<audio>` under BUNDLE; without it, group calls don't route audio.
+    mid_ext_id: Option<u8>,
+    slot_mids: Vec<String>,
     rx: mpsc::UnboundedReceiver<Cmd>,
     /// One-shot: log the first inbound datagram's source (the client's real,
     /// post-NAT address) so a deploy can confirm checks are arriving + from where.
@@ -617,6 +649,18 @@ impl Driver {
                                     // track SSRC so the browser accepts the stream.
                                     let mut p = (*pkt).clone();
                                     p.header.ssrc = ssrc;
+                                    // Stamp the slot's MID so the browser demuxes
+                                    // this onto the right track under BUNDLE.
+                                    if let (Some(id), Some(mid)) =
+                                        (self.mid_ext_id, self.slot_mids.get(slot))
+                                    {
+                                        p.header.extension = true;
+                                        p.header.extension_profile =
+                                            rtp::header::EXTENSION_PROFILE_ONE_BYTE;
+                                        let _ = p
+                                            .header
+                                            .set_extension(id, Bytes::copy_from_slice(mid.as_bytes()));
+                                    }
                                     let _ = sender.write_rtp(p);
                                 }
                             }
