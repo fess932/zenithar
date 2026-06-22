@@ -74,6 +74,39 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
         }
     }
 
+    // Unread badges. Accessible rooms: clients see only their own, employees all.
+    // On the first ever connect, baseline every room to "read" so old history
+    // isn't shown as unread; then send the current per-room counts (they survive
+    // a reload). The open room is marked read here and on every later switch.
+    let accessible: Vec<String> = match &client_room {
+        Some(room) => vec![room.clone()],
+        None => db::list_rooms_for_user(&state.reads)
+            .await
+            .map(|v| v.into_iter().map(|r| r.id).collect())
+            .unwrap_or_default(),
+    };
+    {
+        let now = crate::now_millis();
+        if !db::has_reads(&state.reads, &principal.id)
+            .await
+            .unwrap_or(true)
+        {
+            for room in &accessible {
+                let _ = db::mark_read(&state.db, &principal.id, room, now).await;
+            }
+        }
+        let _ = db::mark_read(&state.db, &principal.id, &active_room, now).await;
+        if let Ok(counts) = db::unread_counts(&state.reads, &principal.id, &accessible).await {
+            let frame = Outbound::UnreadCounts { counts };
+            if let Ok(json) = serde_json::to_string(&frame) {
+                if sender.send(Message::Text(json.into())).await.is_err() {
+                    state.presence.leave(&principal.id);
+                    return;
+                }
+            }
+        }
+    }
+
     // Per-socket message rate limit: burst 10, ~1/s sustained.
     let mut msg_bucket = LocalBucket::new(10.0, 1.0);
 
@@ -122,10 +155,15 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                             debug!(room = %room_id, "join denied");
                             continue;
                         }
+                        // Leaving the current room → it's read up to now; the room
+                        // we're opening becomes read too (clears its unread badge).
+                        let now = crate::now_millis();
+                        let _ = db::mark_read(&state.db, &principal.id, &active_room, now).await;
                         active_room = room_id;
                         if send_history(&mut sender, &state, &active_room).await.is_err() {
                             break;
                         }
+                        let _ = db::mark_read(&state.db, &principal.id, &active_room, now).await;
                     }
                     Inbound::Msg { body, client_msg_id, attachment_ids, reply_to } => {
                         if !msg_bucket.check() {
@@ -308,6 +346,16 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                             }
                         }
                     }
+                    // Another room employees can see → bump its unread badge (not
+                    // for our own message; clients only see their own room).
+                    Ok(chat) if is_employee && chat.author_id != principal.id => {
+                        let frame = Outbound::Unread { room_id: chat.room_id };
+                        if let Ok(json) = serde_json::to_string(&frame) {
+                            if sender.send(Message::Text(json.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
                     Ok(_) => {}                       // different room → ignore
                     Err(RecvError::Lagged(_)) => {}   // dropped some; keep going
                     Err(RecvError::Closed) => break,
@@ -315,6 +363,9 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
             }
         }
     }
+    // Read up to now for the room we were viewing, so a reconnect/reload doesn't
+    // re-count messages we already saw while connected.
+    let _ = db::mark_read(&state.db, &principal.id, &active_room, crate::now_millis()).await;
     state.presence.leave(&principal.id);
     info!("websocket closed");
 }

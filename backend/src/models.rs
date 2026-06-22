@@ -148,6 +148,12 @@ pub enum Outbound {
         kind: String,
         online: bool,
     },
+    /// Per-room unread counts, sent on connect so the chat list survives a reload.
+    UnreadCounts {
+        counts: std::collections::HashMap<String, i64>,
+    },
+    /// A message landed in a room you're not viewing — bump its unread badge.
+    Unread { room_id: String },
 }
 
 /// An addressed signaling frame fanned out over the `signal` broadcast channel.

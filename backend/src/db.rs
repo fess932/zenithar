@@ -431,6 +431,62 @@ pub async fn list_recorded_calls(reads: &SqlitePool) -> sqlx::Result<Vec<Recorde
     .await
 }
 
+/// Mark a room read for a principal up to `ts`; never moves the mark backward.
+pub async fn mark_read(
+    write: &SqlitePool,
+    principal_id: &str,
+    room_id: &str,
+    ts: i64,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO room_reads (principal_id, room_id, last_read_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(principal_id, room_id) DO UPDATE SET last_read_at = MAX(last_read_at, ?3)",
+    )
+    .bind(principal_id)
+    .bind(room_id)
+    .bind(ts)
+    .execute(write)
+    .await?;
+    Ok(())
+}
+
+/// Whether a principal has any read mark yet — false only on their first ever
+/// connect, when we baseline all rooms to "read" so old history isn't unread.
+pub async fn has_reads(reads: &SqlitePool, principal_id: &str) -> sqlx::Result<bool> {
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM room_reads WHERE principal_id = ?1")
+        .bind(principal_id)
+        .fetch_one(reads)
+        .await?;
+    Ok(n > 0)
+}
+
+/// Unread counts per room for a principal: messages newer than their read mark,
+/// excluding their own. A room with no mark counts from the start (a brand-new
+/// room is all-unread). Only rooms with a non-zero count are returned.
+pub async fn unread_counts(
+    reads: &SqlitePool,
+    principal_id: &str,
+    room_ids: &[String],
+) -> sqlx::Result<std::collections::HashMap<String, i64>> {
+    let mut out = std::collections::HashMap::new();
+    for room in room_ids {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM messages m
+             WHERE m.room_id = ?1 AND m.author_id != ?2
+               AND m.created_at > COALESCE(
+                 (SELECT last_read_at FROM room_reads WHERE principal_id = ?2 AND room_id = ?1), 0)",
+        )
+        .bind(room)
+        .bind(principal_id)
+        .fetch_one(reads)
+        .await?;
+        if n > 0 {
+            out.insert(room.clone(), n);
+        }
+    }
+    Ok(out)
+}
+
 /// Persisted last-seen times (`principal_id → unix millis`), loaded on startup to
 /// seed the in-memory presence registry so a restart doesn't lose the data.
 pub async fn load_last_seen(

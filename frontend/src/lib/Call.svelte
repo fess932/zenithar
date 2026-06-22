@@ -7,6 +7,8 @@
     callMuted,
     callLevels,
     callSpeaker,
+    callVolume,
+    setVolume,
     canRouteAudio,
     incoming,
     startCall,
@@ -18,6 +20,10 @@
   } from "./call";
 
   const pct = (v: number): number => Math.round(Math.min(1, Math.max(0, v)) * 100);
+
+  // Volume slider lives in a small popover so the control bar stays compact on phones.
+  let showVolume = $state(false);
+  const volIcon = (v: number): string => (v === 0 ? "🔇" : v < 0.5 ? "🔉" : "🔊");
 
   // Only phones get a loudspeaker toggle: a coarse pointer + a browser that can
   // actually route output. Desktops use the OS; iOS Safari can't route at all.
@@ -100,6 +106,35 @@
         {$callSpeaker ? "📢" : "🔈"}
       </button>
     {/if}
+    <div class="relative shrink-0">
+      <button
+        type="button"
+        onclick={() => (showVolume = !showVolume)}
+        aria-label={$t("volume")}
+        aria-pressed={showVolume}
+        title={$t("volume")}
+        class="grid size-9 cursor-pointer place-items-center rounded-md border border-line text-base text-muted hover:text-text aria-[pressed=true]:border-beacon aria-[pressed=true]:text-beacon"
+      >
+        {volIcon($callVolume)}
+      </button>
+      {#if showVolume}
+        <div
+          class="absolute bottom-full right-0 mb-2 flex items-center gap-2 rounded-md border border-line bg-surface p-2 shadow-lg"
+        >
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value={$callVolume}
+            oninput={(e) => setVolume(Number(e.currentTarget.value))}
+            aria-label={$t("volume")}
+            class="w-28 accent-beacon"
+          />
+          <span class="w-9 text-right text-[0.7rem] tabular-nums text-muted">{pct($callVolume)}%</span>
+        </div>
+      {/if}
+    </div>
     <button
       type="button"
       onclick={toggleMute}

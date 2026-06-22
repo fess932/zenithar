@@ -321,15 +321,22 @@ test("browser: anonymous message notifies employees (toast + unread badge)", asy
   await cp.goto(client.url);
   await expect(cp.locator('.beacon[data-state="live"]')).toBeVisible({ timeout: 10000 });
 
+  // The unread badge persists across rooms/reloads now, so the admin may already
+  // carry unread from earlier in the suite — assert it GROWS, not that it's "1".
+  const chats = page.getByRole("button", { name: /Чаты|Chats/ });
+  const unreadOf = async (): Promise<number> =>
+    Number((await chats.textContent())?.match(/\d+/)?.[0] ?? "0");
+  const before = await unreadOf();
+
   // Admin stays in the common room; the client writes in their own room.
   const msg = `ping-${Date.now()}`;
   const cinput = cp.getByPlaceholder(composer);
   await cinput.fill(msg);
   await cinput.press("Enter");
 
-  // Admin (cross-room) gets a toast previewing the message + an unread badge.
+  // Admin (cross-room) gets a toast previewing the message + the unread badge bumps.
   await expect(page.getByText(msg)).toBeVisible({ timeout: 10000 });
-  await expect(page.getByRole("button", { name: /Чаты|Chats/ })).toContainText("1");
+  await expect.poll(unreadOf, { timeout: 10000 }).toBeGreaterThan(before);
 
   await ctx.close();
 });

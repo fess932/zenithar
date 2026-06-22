@@ -65,6 +65,8 @@ type Frame =
   | { type: "client-notice"; notice: ClientNotice }
   | { type: "presence-snapshot"; online: PresenceEntry[] }
   | { type: "presence"; id: string; kind: string; online: boolean }
+  | { type: "unread-counts"; counts: Record<string, number> }
+  | { type: "unread"; room_id: string }
   | { type: string; [k: string]: unknown };
 
 /// A unique id that works outside secure contexts too. `crypto.randomUUID` is
@@ -229,10 +231,16 @@ export function connect(): void {
       incomingHandler?.(msg);
     } else if (f.type === "client-notice") {
       const n = (f as { notice: ClientNotice }).notice;
-      // Server only sends these cross-room, but guard anyway.
-      if (n.room_id !== get(activeRoom)) {
-        unread.update((u) => ({ ...u, [n.room_id]: (u[n.room_id] ?? 0) + 1 }));
-        clientNoticeHandler?.(n);
+      // Sound/toast only (the unread count comes from the "unread" frame below,
+      // which covers every room — not just anonymous-client ones).
+      if (n.room_id !== get(activeRoom)) clientNoticeHandler?.(n);
+    } else if (f.type === "unread-counts") {
+      // Authoritative per-room counts from the server (survives reload).
+      unread.set((f as { counts: Record<string, number> }).counts ?? {});
+    } else if (f.type === "unread") {
+      const room = (f as { room_id: string }).room_id;
+      if (room !== get(activeRoom)) {
+        unread.update((u) => ({ ...u, [room]: (u[room] ?? 0) + 1 }));
       }
     } else if (f.type === "presence-snapshot") {
       const list = (f as { online: PresenceEntry[] }).online;

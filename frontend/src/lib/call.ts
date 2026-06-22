@@ -32,6 +32,31 @@ export const callLevels = writable<{ local: number; remote: number }>({ local: 0
 
 /// Output routing (mostly for phones): true = loudspeaker, false = earpiece.
 export const callSpeaker = writable<boolean>(false);
+
+/// Output volume for incoming call audio (0..1), remembered across calls.
+const VOL_KEY = "zenithar.callVolume";
+function initialVolume(): number {
+  try {
+    const raw = localStorage.getItem(VOL_KEY);
+    const v = raw == null ? 1 : Number(raw);
+    return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1;
+  } catch {
+    return 1;
+  }
+}
+export const callVolume = writable<number>(initialVolume());
+
+/// Set the call output volume (0..1) for the current and future audio; persisted.
+export function setVolume(v: number): void {
+  const vol = Math.min(1, Math.max(0, v));
+  callVolume.set(vol);
+  try {
+    localStorage.setItem(VOL_KEY, String(vol));
+  } catch {
+    /* private mode / storage disabled — volume just won't persist */
+  }
+  for (const el of remoteAudios.values()) el.volume = vol;
+}
 /// Whether the browser lets us route call audio at all (HTMLMediaElement.setSinkId).
 /// Chrome/Android: yes; iOS Safari: no (it gives no web control over the route),
 /// so the UI hides the toggle there instead of showing a dead button.
@@ -316,6 +341,7 @@ async function onOffer(id: string, sdp: string): Promise<void> {
     const el = new Audio();
     el.autoplay = true;
     el.srcObject = stream;
+    el.volume = get(callVolume); // honor the chosen volume on (re)connect
     void el.play().catch(() => {});
     remoteAudios.set(e.track.id, el);
     void applyOutput(get(callSpeaker)); // honor the chosen route on (re)connect

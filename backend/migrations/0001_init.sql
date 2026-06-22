@@ -112,3 +112,13 @@ CREATE TABLE IF NOT EXISTS last_seen (
     principal_id TEXT PRIMARY KEY,
     ts           INTEGER NOT NULL   -- unix millis of last activity
 );
+
+-- Per-principal read position per room, so the chat list can show unread counts
+-- that survive a reload. `last_read_at` = the newest message timestamp the user
+-- has seen in that room (advanced when they open/leave it).
+CREATE TABLE IF NOT EXISTS room_reads (
+    principal_id TEXT NOT NULL,
+    room_id      TEXT NOT NULL,
+    last_read_at INTEGER NOT NULL,  -- unix millis
+    PRIMARY KEY (principal_id, room_id)
+);
