@@ -379,7 +379,12 @@ async fn main() -> Result<()> {
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
-    info!(%db_path, "zenithar backend listening on http://{bind}");
+    info!(
+        %db_path,
+        commit = env!("ZENITHAR_GIT_SHA"),
+        commit_msg = env!("ZENITHAR_GIT_MSG"),
+        "zenithar backend listening on http://{bind}"
+    );
     axum::serve(listener, app).await?;
     Ok(())
 }

@@ -35,6 +35,10 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs \
 # Real sources + the embedded frontend (path is relative to the crate root).
 COPY backend/ ./
 COPY --from=frontend /app/frontend/dist /app/frontend/dist
+# Git commit baked into the binary for the startup log (.git isn't in the build
+# context, so CI passes these as build args; ARGs are visible to RUN/build.rs).
+ARG GIT_SHA=unknown
+ARG GIT_MSG=unknown
 # `touch` is essential: COPY restores the context's (older) mtimes, so without
 # it cargo sees the dummy-built artifact as newer and skips the real build,
 # shipping the empty `fn main(){}` stub. Bump mtimes to force a recompile.
