@@ -57,13 +57,15 @@ async function pickOutput(speaker: boolean): Promise<string | null> {
 }
 
 async function applyOutput(speaker: boolean): Promise<void> {
-  if (!remoteAudio || !canRouteAudio) return;
+  if (!canRouteAudio) return;
   const id = await pickOutput(speaker);
   if (id == null) return;
-  try {
-    await (remoteAudio as SinkAudio).setSinkId(id);
-  } catch {
-    /* device vanished or not permitted — keep the current route */
+  for (const el of remoteAudios.values()) {
+    try {
+      await (el as SinkAudio).setSinkId(id);
+    } catch {
+      /* device vanished or not permitted — keep the current route */
+    }
   }
 }
 
@@ -76,7 +78,9 @@ export function toggleSpeaker(): void {
 
 let pc: RTCPeerConnection | null = null;
 let localStream: MediaStream | null = null;
-let remoteAudio: HTMLAudioElement | null = null;
+// One <audio> per incoming track (a group call forwards each speaker on its own
+// track), keyed by track id.
+const remoteAudios = new Map<string, HTMLAudioElement>();
 let callId: string | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 let connectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -110,7 +114,8 @@ async function loadIceServers(): Promise<void> {
 type ACtor = typeof AudioContext;
 let meterCtxInst: AudioContext | null = null;
 let localAnalyser: AnalyserNode | null = null;
-let remoteAnalyser: AnalyserNode | null = null;
+// One analyser per incoming track; the remote meter shows the loudest.
+const remoteAnalysers = new Map<string, AnalyserNode>();
 let meterRaf: number | null = null;
 
 function meterCtx(): AudioContext | null {
@@ -148,9 +153,11 @@ function rmsLevel(an: AnalyserNode): number {
 function startMeter(): void {
   if (meterRaf !== null) return;
   const tick = (): void => {
+    let remote = 0;
+    for (const an of remoteAnalysers.values()) remote = Math.max(remote, rmsLevel(an));
     callLevels.set({
       local: localAnalyser ? rmsLevel(localAnalyser) : 0,
-      remote: remoteAnalyser ? rmsLevel(remoteAnalyser) : 0,
+      remote,
     });
     meterRaf = requestAnimationFrame(tick);
   };
@@ -161,7 +168,7 @@ function stopMeter(): void {
   if (meterRaf !== null) cancelAnimationFrame(meterRaf);
   meterRaf = null;
   localAnalyser = null;
-  remoteAnalyser = null;
+  remoteAnalysers.clear();
   callLevels.set({ local: 0, remote: 0 });
 }
 
@@ -304,17 +311,23 @@ async function onOffer(id: string, sdp: string): Promise<void> {
   startMeter();
 
   pc.ontrack = (e) => {
+    // Each incoming track is one other participant — play them all.
     const stream = e.streams[0] ?? new MediaStream([e.track]);
-    if (!remoteAudio) {
-      remoteAudio = new Audio();
-      remoteAudio.autoplay = true;
-    }
-    remoteAudio.srcObject = stream;
-    void remoteAudio.play().catch(() => {});
+    const el = new Audio();
+    el.autoplay = true;
+    el.srcObject = stream;
+    void el.play().catch(() => {});
+    remoteAudios.set(e.track.id, el);
     void applyOutput(get(callSpeaker)); // honor the chosen route on (re)connect
-    // Meter the incoming audio — if this bar stays flat, nothing is coming back.
-    remoteAnalyser = analyserFor(stream);
+    // Meter the incoming audio — if every bar stays flat, nothing is coming back.
+    const an = analyserFor(stream);
+    if (an) remoteAnalysers.set(e.track.id, an);
     startMeter();
+    e.track.onended = () => {
+      el.srcObject = null;
+      remoteAudios.delete(e.track.id);
+      remoteAnalysers.delete(e.track.id);
+    };
   };
   pc.onicecandidate = (e) => {
     if (e.candidate && callId) {
@@ -386,10 +399,8 @@ function teardown(): void {
   timer = null;
   localStream?.getTracks().forEach((tr) => tr.stop());
   localStream = null;
-  if (remoteAudio) {
-    remoteAudio.srcObject = null;
-    remoteAudio = null;
-  }
+  for (const el of remoteAudios.values()) el.srcObject = null;
+  remoteAudios.clear();
   pc?.close();
   pc = null;
   callId = null;

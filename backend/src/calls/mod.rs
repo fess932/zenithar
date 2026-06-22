@@ -50,6 +50,11 @@ mod peer;
 mod recorder;
 
 const MAX_DATAGRAM: usize = 2000;
+/// Pre-allocated outbound audio tracks per participant — one per OTHER source, so
+/// each speaker lands on its own SSRC/track and the browser doesn't drop a late
+/// joiner's stream. Caps a call at FORWARD_TRACKS + 1 participants (flat, no
+/// renegotiation).
+const FORWARD_TRACKS: usize = 8;
 /// Cap how long a poll-timeout can sleep so commands/sockets stay responsive.
 const MAX_IDLE: Duration = Duration::from_millis(50);
 
@@ -59,8 +64,12 @@ enum Cmd {
     Answer(String),
     /// A trickled ICE candidate from the participant (JSON `RTCIceCandidateInit`).
     RemoteIce(String),
-    /// Audio from another participant to write down to this one.
-    Forward(Arc<rtp::packet::Packet>),
+    /// Audio from another participant to write down to this one, tagged with the
+    /// source so the receiver puts each source on its own outbound track.
+    Forward {
+        from: String,
+        pkt: Arc<rtp::packet::Packet>,
+    },
     /// Tear this leg down.
     Close,
 }
@@ -249,13 +258,23 @@ impl CallRegistry {
             .with_media_engine(audio_media_engine()?)
             .build()?;
 
-        // The track this participant *receives* (everyone else's audio).
-        let ssrc = u32::from_le_bytes(crate::auth::random_bytes::<4>());
-        let sender_id = pc.add_track(opus_track(
-            "zenithar",
-            &format!("voice-{principal_id}"),
-            ssrc,
-        ))?;
+        // Pre-allocate one outbound track per potential other participant, each
+        // with its own SSRC/stream, so every speaker is forwarded on a distinct
+        // track (mixing several sources onto one would make the browser drop all
+        // but the first). The first track's transceiver also carries the inbound
+        // direction — the browser attaches its mic there.
+        let mut senders = Vec::with_capacity(FORWARD_TRACKS);
+        let mut send_ssrcs = Vec::with_capacity(FORWARD_TRACKS);
+        for i in 0..FORWARD_TRACKS {
+            let ssrc = u32::from_le_bytes(crate::auth::random_bytes::<4>());
+            let sid = pc.add_track(opus_track(
+                &format!("zenithar-{i}"),
+                &format!("voice-{principal_id}-{i}"),
+                ssrc,
+            ))?;
+            senders.push(sid);
+            send_ssrcs.push(ssrc);
+        }
 
         // Advertise our reachable host candidate (public IP in prod, loopback in
         // dev) on the bound port. It rides in the offer SDP, so the client gets it
@@ -307,8 +326,9 @@ impl CallRegistry {
                 // 0.0.0.0 bind addr (see above).
                 local_addr: adv_addr,
                 pc,
-                sender_id,
-                send_ssrc: ssrc,
+                senders,
+                send_ssrcs,
+                slots: HashMap::new(),
                 rx,
                 logged_peer: false,
                 logged_rtp_in: false,
@@ -421,11 +441,13 @@ struct Driver {
     socket: UdpSocket,
     local_addr: SocketAddr,
     pc: RTCPeerConnection,
-    sender_id: RTCRtpSenderId,
-    /// SSRC of THIS leg's outbound track. Forwarded packets (which carry the
-    /// *source* participant's SSRC) must be rewritten to this before write_rtp,
-    /// or the browser drops them as belonging to an unknown stream.
-    send_ssrc: u32,
+    /// Pre-allocated outbound tracks (one per remote source) + their SSRCs. A
+    /// forwarded packet carries the *source's* SSRC, so we rewrite it to the
+    /// slot's SSRC before write_rtp or the browser drops it as an unknown stream.
+    senders: Vec<RTCRtpSenderId>,
+    send_ssrcs: Vec<u32>,
+    /// Which outbound track slot each source participant is forwarded on.
+    slots: HashMap<String, usize>,
     rx: mpsc::UnboundedReceiver<Cmd>,
     /// One-shot: log the first inbound datagram's source (the client's real,
     /// post-NAT address) so a deploy can confirm checks are arriving + from where.
@@ -437,6 +459,22 @@ struct Driver {
 }
 
 impl Driver {
+    /// The outbound track slot a source is forwarded on — assigning a free one on
+    /// first sight. `None` once all slots are taken (call past its flat capacity);
+    /// that source's audio is then dropped (rare: needs > FORWARD_TRACKS others).
+    fn slot_for(&mut self, source: &str) -> Option<usize> {
+        if let Some(&s) = self.slots.get(source) {
+            return Some(s);
+        }
+        let s = self.slots.len();
+        if s >= self.senders.len() {
+            debug!(participant = %self.my_id, "call full — dropping a participant's audio");
+            return None;
+        }
+        self.slots.insert(source.to_string(), s);
+        Some(s)
+    }
+
     #[tracing::instrument(skip_all, fields(call = %self.call.id, participant = %self.my_id))]
     async fn run(mut self) {
         let mut buf = vec![0u8; MAX_DATAGRAM];
@@ -483,7 +521,10 @@ impl Driver {
                         .add(&self.my_id, pkt.header.timestamp, &pkt.payload);
                     let pkt = Arc::new(pkt);
                     for tx in others {
-                        let _ = tx.send(Cmd::Forward(pkt.clone()));
+                        let _ = tx.send(Cmd::Forward {
+                            from: self.my_id.clone(),
+                            pkt: pkt.clone(),
+                        });
                     }
                 }
             }
@@ -545,20 +586,20 @@ impl Driver {
                                 Err(e) => debug!(error = %e, "bad remote candidate"),
                             }
                         }
-                        Some(Cmd::Forward(pkt)) => {
-                            if let Some(mut sender) = self.pc.rtp_sender(self.sender_id) {
-                                if !self.logged_rtp_out {
-                                    self.logged_rtp_out = true;
-                                    info!(participant = %self.my_id, "first RTP out (writing audio toward this participant)");
+                        Some(Cmd::Forward { from, pkt }) => {
+                            if let Some(slot) = self.slot_for(&from) {
+                                let ssrc = self.send_ssrcs[slot];
+                                if let Some(mut sender) = self.pc.rtp_sender(self.senders[slot]) {
+                                    if !self.logged_rtp_out {
+                                        self.logged_rtp_out = true;
+                                        info!(participant = %self.my_id, "first RTP out (writing audio toward this participant)");
+                                    }
+                                    // Re-stamp the source's SSRC with this slot's
+                                    // track SSRC so the browser accepts the stream.
+                                    let mut p = (*pkt).clone();
+                                    p.header.ssrc = ssrc;
+                                    let _ = sender.write_rtp(p);
                                 }
-                                // Re-stamp the source's SSRC with this leg's track
-                                // SSRC so the browser accepts it as its stream.
-                                let mut p = (*pkt).clone();
-                                p.header.ssrc = self.send_ssrc;
-                                let _ = sender.write_rtp(p);
-                            } else if !self.logged_rtp_out {
-                                self.logged_rtp_out = true;
-                                warn!(participant = %self.my_id, "no rtp_sender to forward into — audio won't reach this participant");
                             }
                         }
                         Some(Cmd::Close) | None => break 'drive,
