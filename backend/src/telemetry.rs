@@ -34,7 +34,14 @@ static PROVIDER: OnceLock<SdkTracerProvider> = OnceLock::new();
 /// Install the global subscriber. Console logging always; OTLP trace export too
 /// when `ZENITHAR_OTLP_ENDPOINT` is set.
 pub fn init() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    // Start from RUST_LOG (or info), then silence the noisy WebRTC library WARNs
+    // that flood the log during every call — all benign: duplicated SRTP packets,
+    // RTP written a beat before SRTP keys are ready, and unknown DTLS extensions.
+    // Our own call diagnostics stay at info.
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"))
+        .add_directive("rtc::peer_connection::handler=error".parse().unwrap())
+        .add_directive("rtc_dtls=error".parse().unwrap());
     let fmt_layer = tracing_subscriber::fmt::layer();
 
     let otel_layer = match endpoint() {

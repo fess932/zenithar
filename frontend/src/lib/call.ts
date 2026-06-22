@@ -325,11 +325,14 @@ async function onOffer(id: string, sdp: string): Promise<void> {
     const st = pc?.connectionState;
     if (st === "connected") startTimer();
     else if (st === "failed") {
-      notify(get(t)("callFailed")); // ICE couldn't connect (often NAT/firewall)
+      notify(get(t)("callFailed")); // ICE gave up (often NAT/firewall)
       hangup();
-    } else if (st === "closed" || st === "disconnected") {
+    } else if (st === "closed") {
       hangup();
     }
+    // "disconnected" is transient — ICE may recover to "connected", or fall
+    // through to "failed". Tearing down here ended calls on a brief blip
+    // (the ring vanished and you had to redial).
   };
 
   await pc.setRemoteDescription({ type: "offer", sdp });

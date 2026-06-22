@@ -454,11 +454,11 @@ impl Driver {
             while let Some(ev) = self.pc.poll_event() {
                 if let RTCPeerConnectionEvent::OnConnectionStateChangeEvent(s) = ev {
                     debug!(participant = %self.my_id, state = %s, "pc state");
+                    // `Disconnected` is transient (ICE may recover) — don't tear
+                    // the leg down on it, or a brief blip ends the whole call.
                     if matches!(
                         s,
-                        RTCPeerConnectionState::Failed
-                            | RTCPeerConnectionState::Disconnected
-                            | RTCPeerConnectionState::Closed
+                        RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed
                     ) {
                         dead = true;
                     }
