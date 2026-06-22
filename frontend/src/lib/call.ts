@@ -57,6 +57,38 @@ export function setVolume(v: number): void {
   }
   for (const el of remoteAudios.values()) el.volume = vol;
 }
+
+/// Mic input gain (0..MIC_MAX). 1 = normal; above 1 BOOSTS the mic past 100%
+/// (via a Web Audio GainNode on the outgoing stream), which HTMLMediaElement
+/// volume can't do. Remembered across calls.
+export const MIC_MAX = 2;
+const MIC_KEY = "zenithar.micGain";
+function initialMicGain(): number {
+  try {
+    const raw = localStorage.getItem(MIC_KEY);
+    const v = raw == null ? 1 : Number(raw);
+    return Number.isFinite(v) ? Math.min(MIC_MAX, Math.max(0, v)) : 1;
+  } catch {
+    return 1;
+  }
+}
+export const micGain = writable<number>(initialMicGain());
+// Live gain node in the outgoing chain (set up per call); null between calls.
+let micGainNode: GainNode | null = null;
+let micSource: MediaStreamAudioSourceNode | null = null;
+
+/// Set the mic gain (0..MIC_MAX) for the current and future calls; persisted.
+export function setMicGain(v: number): void {
+  const g = Math.min(MIC_MAX, Math.max(0, v));
+  micGain.set(g);
+  try {
+    localStorage.setItem(MIC_KEY, String(g));
+  } catch {
+    /* private mode / storage disabled — just won't persist */
+  }
+  if (micGainNode) micGainNode.gain.value = g;
+}
+
 /// Whether the browser lets us route call audio at all (HTMLMediaElement.setSinkId).
 /// Chrome/Android: yes; iOS Safari: no (it gives no web control over the route),
 /// so the UI hides the toggle there instead of showing a dead button.
@@ -159,6 +191,26 @@ function analyserFor(stream: MediaStream): AnalyserNode | null {
   an.fftSize = 256;
   ctx.createMediaStreamSource(stream).connect(an);
   return an;
+}
+
+/// Route the raw mic through a GainNode so it can be boosted past 100%, and
+/// return the stream to actually SEND. Falls back to the raw mic if Web Audio
+/// isn't available (gain control is then a no-op).
+function micPipeline(input: MediaStream): MediaStream {
+  const ctx = meterCtx();
+  if (!ctx) return input;
+  try {
+    micSource = ctx.createMediaStreamSource(input);
+    micGainNode = ctx.createGain();
+    micGainNode.gain.value = get(micGain);
+    const dest = ctx.createMediaStreamDestination();
+    micSource.connect(micGainNode).connect(dest);
+    return dest.stream;
+  } catch {
+    micSource = null;
+    micGainNode = null;
+    return input;
+  }
 }
 
 function rmsLevel(an: AnalyserNode): number {
@@ -329,10 +381,13 @@ async function onOffer(id: string, sdp: string): Promise<void> {
   }
 
   pc = new RTCPeerConnection(rtcConfig);
-  for (const tr of localStream.getTracks()) pc.addTrack(tr, localStream);
+  // Send the mic through the gain stage (so it can be boosted past 100%); the
+  // pipeline falls back to the raw mic if Web Audio is unavailable.
+  const sendStream = micPipeline(localStream);
+  for (const tr of sendStream.getTracks()) pc.addTrack(tr, sendStream);
 
-  // Meter your own mic right away (shows capture works even before connect).
-  localAnalyser = analyserFor(localStream);
+  // Meter the outgoing (boosted) mic — shows capture works + the effect of gain.
+  localAnalyser = analyserFor(sendStream);
   startMeter();
 
   pc.ontrack = (e) => {
@@ -425,6 +480,10 @@ function teardown(): void {
   timer = null;
   localStream?.getTracks().forEach((tr) => tr.stop());
   localStream = null;
+  micSource?.disconnect();
+  micGainNode?.disconnect();
+  micSource = null;
+  micGainNode = null;
   for (const el of remoteAudios.values()) el.srcObject = null;
   remoteAudios.clear();
   pc?.close();

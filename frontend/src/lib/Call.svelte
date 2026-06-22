@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { fly } from "svelte/transition";
+  import { backOut, bounceOut } from "svelte/easing";
   import { t } from "./i18n";
   import { activeRoom } from "./chat";
   import {
@@ -9,6 +11,9 @@
     callSpeaker,
     callVolume,
     setVolume,
+    micGain,
+    setMicGain,
+    MIC_MAX,
     canRouteAudio,
     incoming,
     startCall,
@@ -60,10 +65,11 @@
 {#if $callState === "connecting" || $callState === "live"}
   <div
     role="status"
-    class="fixed left-1/2 top-[calc(0.6rem+env(safe-area-inset-top))] z-40 flex w-[min(26rem,92vw)] -translate-x-1/2 items-center gap-3 rounded-md border border-beacon bg-surface px-3 py-2 shadow-lg"
+    transition:fly={{ y: -160, duration: 750, easing: bounceOut }}
+    class="fixed left-0 right-0 top-[calc(0.6rem+env(safe-area-inset-top))] z-40 mx-auto flex w-[min(28rem,94vw)] items-center gap-2 rounded-md border border-beacon bg-surface px-3 py-2.5 shadow-lg"
   >
     <span class="beacon-dot" class:animate-pulse={$callState === "connecting"}></span>
-    <span class="min-w-0 flex-1 truncate font-mono text-[0.85rem] text-text">
+    <span class="min-w-0 flex-1 truncate font-mono text-[0.95rem] text-text">
       {#if $callState === "connecting"}
         {$t("callConnecting")}
       {:else}
@@ -101,7 +107,7 @@
         aria-label={$t("speaker")}
         aria-pressed={$callSpeaker}
         title={$t("speaker")}
-        class="grid size-9 shrink-0 cursor-pointer place-items-center rounded-md border border-line text-base text-muted hover:text-text aria-[pressed=true]:border-beacon aria-[pressed=true]:text-beacon"
+        class="grid size-11 shrink-0 cursor-pointer place-items-center rounded-md border border-line text-lg text-muted hover:text-text aria-[pressed=true]:border-beacon aria-[pressed=true]:text-beacon"
       >
         {$callSpeaker ? "📢" : "🔈"}
       </button>
@@ -113,25 +119,45 @@
         aria-label={$t("volume")}
         aria-pressed={showVolume}
         title={$t("volume")}
-        class="grid size-9 cursor-pointer place-items-center rounded-md border border-line text-base text-muted hover:text-text aria-[pressed=true]:border-beacon aria-[pressed=true]:text-beacon"
+        class="grid size-11 cursor-pointer place-items-center rounded-md border border-line text-lg text-muted hover:text-text aria-[pressed=true]:border-beacon aria-[pressed=true]:text-beacon"
       >
         {volIcon($callVolume)}
       </button>
       {#if showVolume}
         <div
-          class="absolute bottom-full right-0 mb-2 flex items-center gap-2 rounded-md border border-line bg-surface p-2 shadow-lg"
+          transition:fly={{ y: -14, duration: 360, easing: backOut }}
+          class="absolute right-0 top-full z-50 mt-2 flex flex-col gap-2 rounded-md border border-line bg-surface p-2.5 shadow-lg"
         >
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={$callVolume}
-            oninput={(e) => setVolume(Number(e.currentTarget.value))}
-            aria-label={$t("volume")}
-            class="w-28 accent-beacon"
-          />
-          <span class="w-9 text-right text-[0.7rem] tabular-nums text-muted">{pct($callVolume)}%</span>
+          <label class="flex items-center gap-2" title={$t("volume")}>
+            <span class="w-5 text-center text-base leading-none" aria-hidden="true">🔊</span>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={$callVolume}
+              oninput={(e) => setVolume(Number(e.currentTarget.value))}
+              aria-label={$t("volume")}
+              class="h-2 w-32 accent-beacon"
+            />
+            <span class="w-10 text-right text-[0.7rem] tabular-nums text-muted">{pct($callVolume)}%</span>
+          </label>
+          <label class="flex items-center gap-2" title={$t("micVolume")}>
+            <span class="w-5 text-center text-base leading-none" aria-hidden="true">🎙</span>
+            <input
+              type="range"
+              min="0"
+              max={MIC_MAX}
+              step="0.05"
+              value={$micGain}
+              oninput={(e) => setMicGain(Number(e.currentTarget.value))}
+              aria-label={$t("micVolume")}
+              class="h-2 w-32 accent-you"
+            />
+            <span class="w-10 text-right text-[0.7rem] tabular-nums text-muted"
+              >{Math.round($micGain * 100)}%</span
+            >
+          </label>
         </div>
       {/if}
     </div>
@@ -140,7 +166,7 @@
       onclick={toggleMute}
       aria-label={$callMuted ? $t("unmute") : $t("mute")}
       aria-pressed={$callMuted}
-      class="grid size-9 shrink-0 cursor-pointer place-items-center rounded-md border border-line text-base text-muted hover:text-text aria-[pressed=true]:border-bad aria-[pressed=true]:text-bad"
+      class="grid size-11 shrink-0 cursor-pointer place-items-center rounded-md border border-line text-lg text-muted hover:text-text aria-[pressed=true]:border-bad aria-[pressed=true]:text-bad"
     >
       {$callMuted ? "🔇" : "🎙"}
     </button>
@@ -148,7 +174,7 @@
       type="button"
       onclick={hangup}
       aria-label={$t("hangup")}
-      class="grid size-9 shrink-0 cursor-pointer place-items-center rounded-md border border-bad bg-bad text-base text-[#1a1206]"
+      class="grid size-11 shrink-0 cursor-pointer place-items-center rounded-md border border-bad bg-bad text-lg text-[#1a1206]"
     >
       ☎
     </button>
