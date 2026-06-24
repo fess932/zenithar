@@ -350,6 +350,10 @@ export function send(
   return true;
 }
 
+/// Per-upload size ceiling — mirrors the backend's `MAX_UPLOAD_BYTES` so the UI
+/// can reject an oversized file up front instead of waiting for a 413.
+export const MAX_UPLOAD_BYTES = 40 * 1024 * 1024;
+
 /// Upload a file/image/voice clip to the active room; returns its metadata.
 export async function uploadFile(file: File): Promise<Attachment | null> {
   const room = get(activeRoom);

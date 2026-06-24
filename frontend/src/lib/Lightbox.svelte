@@ -107,23 +107,35 @@
       ontouchend={onTouchEnd}
     >
       {#key state.index}
-        <button
-          type="button"
-          onclick={() => (zoomed = !zoomed)}
-          aria-label={current.alt}
-          in:fly={{ x: ms(dir * 40), duration: ms(220), easing: quintOut }}
-          class="pointer-events-auto flex max-h-full max-w-full items-center justify-center {zoomed
-            ? 'cursor-zoom-out'
-            : 'cursor-zoom-in'}"
-        >
-          <img
+        {#if current.kind === "video"}
+          <!-- svelte-ignore a11y_media_has_caption -->
+          <video
             src={current.src}
-            alt={current.alt}
-            class="rounded-md shadow-2xl transition-transform duration-200 motion-reduce:transition-none {zoomed
-              ? 'max-w-none'
-              : 'max-h-full max-w-full object-contain'}"
-          />
-        </button>
+            controls
+            autoplay
+            playsinline
+            in:fly={{ x: ms(dir * 40), duration: ms(220), easing: quintOut }}
+            class="pointer-events-auto max-h-full max-w-full rounded-md object-contain shadow-2xl"
+          ></video>
+        {:else}
+          <button
+            type="button"
+            onclick={() => (zoomed = !zoomed)}
+            aria-label={current.alt}
+            in:fly={{ x: ms(dir * 40), duration: ms(220), easing: quintOut }}
+            class="pointer-events-auto flex max-h-full max-w-full items-center justify-center {zoomed
+              ? 'cursor-zoom-out'
+              : 'cursor-zoom-in'}"
+          >
+            <img
+              src={current.src}
+              alt={current.alt}
+              class="rounded-md shadow-2xl transition-transform duration-200 motion-reduce:transition-none {zoomed
+                ? 'max-w-none'
+                : 'max-h-full max-w-full object-contain'}"
+            />
+          </button>
+        {/if}
       {/key}
     </div>
 

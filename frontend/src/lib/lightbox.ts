@@ -1,18 +1,20 @@
-// An in-app image viewer (lightbox) with gallery navigation. Opening any image
-// attachment gathers every image in the current transcript into an ordered
-// gallery so you can page through them (arrows / swipe) without leaving the app.
+// An in-app media viewer (lightbox) with gallery navigation. Opening any image
+// or video attachment gathers every image AND video in the current transcript
+// into an ordered gallery so you can page through them (arrows / swipe) without
+// leaving the app — videos play inline with native controls.
 import { get, writable } from "svelte/store";
 import { messages } from "./chat";
 
-export interface LightboxImage {
+export interface LightboxItem {
   id: string;
+  kind: "image" | "video";
   src: string; // full-resolution URL
   alt: string;
   filename: string;
 }
 
 interface LightboxState {
-  items: LightboxImage[];
+  items: LightboxItem[];
   index: number;
 }
 
@@ -20,14 +22,19 @@ export const lightbox = writable<LightboxState | null>(null);
 
 const orig = (id: string) => `/api/attachments/${id}`;
 
-/// Open the viewer at the given attachment, with all transcript images as the
-/// gallery (so prev/next can page through them).
+/// Open the viewer at the given attachment, with all transcript images and
+/// videos as the gallery (so prev/next can page through them).
 export function openLightbox(attachmentId: string): void {
-  const items: LightboxImage[] = [];
+  const items: LightboxItem[] = [];
   for (const m of get(messages)) {
     for (const a of m.attachments) {
-      if (a.content_type.startsWith("image/")) {
-        items.push({ id: a.id, src: orig(a.id), alt: a.filename, filename: a.filename });
+      const kind = a.content_type.startsWith("image/")
+        ? "image"
+        : a.content_type.startsWith("video/")
+          ? "video"
+          : null;
+      if (kind) {
+        items.push({ id: a.id, kind, src: orig(a.id), alt: a.filename, filename: a.filename });
       }
     }
   }

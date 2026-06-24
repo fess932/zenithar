@@ -47,6 +47,8 @@ const ru = {
   errSend: "Нет соединения — сообщение не отправлено",
   errUpload: "Не удалось загрузить файл",
   errTooMany: "Можно прикрепить до 5 файлов",
+  errTooBig: "Файл больше 40 МБ",
+  dropHint: "Отпустите, чтобы загрузить",
   dismiss: "Закрыть",
   // calls
   call: "Позвонить",
@@ -155,6 +157,8 @@ const en: Record<keyof typeof ru, string> = {
   errSend: "No connection — message not sent",
   errUpload: "Upload failed",
   errTooMany: "Up to 5 attachments",
+  errTooBig: "File is larger than 40 MB",
+  dropHint: "Drop to upload",
   dismiss: "Dismiss",
   call: "Call",
   callConnecting: "Connecting…",

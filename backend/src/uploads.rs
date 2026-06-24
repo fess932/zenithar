@@ -17,8 +17,9 @@ use crate::state::AppState;
 use crate::storage::{thumb_key, Storage};
 use crate::{db, now_millis};
 
-/// 25 MB ceiling per upload (also enforced as the route body limit).
-pub const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
+/// 40 MB ceiling per upload (also enforced as the route body limit). Sized to
+/// admit short MP4 clips alongside images and voice notes.
+pub const MAX_UPLOAD_BYTES: usize = 40 * 1024 * 1024;
 const THUMB_MAX: u32 = 320;
 
 /// `POST /api/upload` — multipart `room_id` + `file`, browser path (cookie auth +

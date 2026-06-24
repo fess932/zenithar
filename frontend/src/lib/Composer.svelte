@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from "./i18n";
-  import { send, uploadFile, notify, replyingTo, editing, editMessage, type Attachment } from "./chat";
+  import { send, uploadFile, notify, replyingTo, editing, editMessage, MAX_UPLOAD_BYTES, type Attachment } from "./chat";
   import { EMOJI } from "./emoji";
 
   const MAX_ATTACH = 5;
@@ -95,6 +95,10 @@
       notify($t("errTooMany"));
       return;
     }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      notify($t("errTooBig"));
+      return;
+    }
     uploading = true;
     const a = await uploadFile(file);
     uploading = false;
@@ -105,19 +109,70 @@
     pending = pending.filter((a) => a.id !== id);
   }
 
-  // Paste an image straight from the clipboard (e.g. a screenshot) — uploads it
-  // as an attachment instead of pasting garbage text. Mostly a desktop flow;
-  // mobile keyboards rarely expose images here, so phones use the 📎 button.
+  // Drag-and-drop: drop a file anywhere over the app to attach it (the reliable
+  // desktop path when Finder-copied files don't make it onto the clipboard).
+  // Listeners sit on window so the whole chat is a drop target; a counter tracks
+  // enter/leave so the overlay doesn't flicker over child elements.
+  let dragging = false;
+  let dragDepth = 0;
+
+  function hasFiles(e: DragEvent): boolean {
+    return Array.from(e.dataTransfer?.types ?? []).includes("Files");
+  }
+
+  function onDragEnter(e: DragEvent): void {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    if ($editing) return; // edits don't carry attachments
+    dragDepth += 1;
+    dragging = true;
+  }
+
+  function onDragOver(e: DragEvent): void {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); // required so the drop event fires instead of navigation
+    if (e.dataTransfer) e.dataTransfer.dropEffect = $editing ? "none" : "copy";
+  }
+
+  function onDragLeave(): void {
+    if (!dragging) return;
+    dragDepth -= 1;
+    if (dragDepth <= 0) {
+      dragDepth = 0;
+      dragging = false;
+    }
+  }
+
+  async function onDrop(e: DragEvent): Promise<void> {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragging = false;
+    dragDepth = 0;
+    if ($editing) return;
+    for (const file of Array.from(e.dataTransfer?.files ?? [])) await doUpload(file);
+  }
+
+  // Paste image/video straight from the clipboard (e.g. a screenshot, or a clip
+  // copied from an app) — uploads it as an attachment instead of pasting garbage
+  // text. Mostly a desktop flow; mobile keyboards rarely expose media here, so
+  // phones use the 📎 button. Note: on macOS a file COPIED IN FINDER usually
+  // isn't exposed to the page as clipboard bytes — that path needs the picker or
+  // drag-drop; this catches media data already on the clipboard (screenshots etc).
   async function onPaste(e: ClipboardEvent): Promise<void> {
     const items = Array.from(e.clipboardData?.items ?? []);
-    const images = items.filter((it) => it.kind === "file" && it.type.startsWith("image/"));
-    if (images.length === 0) return; // ordinary text paste — leave it alone
+    const media = items.filter(
+      (it) =>
+        it.kind === "file" &&
+        (it.type.startsWith("image/") || it.type.startsWith("video/")),
+    );
+    if (media.length === 0) return; // ordinary text paste — leave it alone
     e.preventDefault();
-    for (const it of images) {
+    for (const it of media) {
       const blob = it.getAsFile();
       if (!blob) continue;
-      const ext = (blob.type.split("/")[1] || "png").replace("jpeg", "jpg");
-      const file = new File([blob], `pasted-${Date.now()}.${ext}`, { type: blob.type });
+      const ext = (blob.type.split("/")[1] || "bin").replace("jpeg", "jpg");
+      const prefix = blob.type.startsWith("video/") ? "clip" : "pasted";
+      const file = new File([blob], `${prefix}-${Date.now()}.${ext}`, { type: blob.type });
       await doUpload(file);
     }
   }
@@ -176,6 +231,27 @@
   }
 </script>
 
+<svelte:window
+  ondragenter={onDragEnter}
+  ondragover={onDragOver}
+  ondragleave={onDragLeave}
+  ondrop={onDrop}
+/>
+
+<!-- Drag-and-drop overlay: covers the viewport while a file is dragged over. -->
+{#if dragging}
+  <div
+    class="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-ink/70 p-6 backdrop-blur-sm"
+  >
+    <div
+      class="grid place-items-center gap-2 rounded-2xl border-2 border-dashed border-beacon bg-surface/80 px-10 py-8 text-center shadow-2xl"
+    >
+      <span class="text-4xl leading-none">📎</span>
+      <span class="font-mono text-sm text-beacon">{$t("dropHint")}</span>
+    </div>
+  </div>
+{/if}
+
 <div class="min-w-0 w-full border-t border-line bg-surface px-3 pt-[0.6rem] pb-[calc(0.6rem+env(safe-area-inset-bottom))] sm:px-5">
   <!-- edit mode: banner above the input; submit sends an edit, not a new message -->
   {#if $editing}
@@ -230,7 +306,11 @@
             />
           {:else}
             <span class="grid size-9 shrink-0 place-items-center text-base">
-              {a.content_type.startsWith("audio/") ? "🎤" : "📎"}
+              {a.content_type.startsWith("audio/")
+                ? "🎤"
+                : a.content_type.startsWith("video/")
+                  ? "🎬"
+                  : "📎"}
             </span>
           {/if}
           <span class="max-w-[8rem] truncate font-mono text-[0.74rem] text-text">{pendingLabel(a)}</span>

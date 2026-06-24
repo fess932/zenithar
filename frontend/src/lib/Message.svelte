@@ -138,6 +138,31 @@
                 class="max-h-48 max-w-[12rem] object-cover"
               />
             </button>
+          {:else if a.content_type.startsWith("video/")}
+            <button
+              type="button"
+              onclick={() => openLightbox(a.id)}
+              class="group relative block cursor-pointer overflow-hidden rounded-md border border-line transition hover:border-beacon active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100"
+            >
+              <!-- First frame as the poster; the lightbox handles playback. -->
+              <!-- svelte-ignore a11y_media_has_caption -->
+              <video
+                src={`${orig(a.id)}#t=0.1`}
+                preload="metadata"
+                muted
+                playsinline
+                tabindex="-1"
+                class="max-h-48 max-w-[12rem] bg-black object-cover"
+              ></video>
+              <span
+                class="pointer-events-none absolute inset-0 grid place-items-center transition group-hover:brightness-110"
+              >
+                <span
+                  class="grid size-11 place-items-center rounded-full bg-black/55 text-lg text-white backdrop-blur-sm"
+                  >▶</span
+                >
+              </span>
+            </button>
           {:else if a.content_type.startsWith("audio/")}
             <VoicePlayer src={orig(a.id)} />
           {:else}
