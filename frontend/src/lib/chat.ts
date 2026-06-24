@@ -30,6 +30,7 @@ export interface ChatMessage {
   reply_to: ReplyPreview | null;
   client_msg_id: string | null;
   created_at: number; // unix millis
+  edited_at: number | null; // set when the author edits the body
   attachments: Attachment[];
 }
 
@@ -67,6 +68,8 @@ type Frame =
   | { type: "presence"; id: string; kind: string; online: boolean }
   | { type: "unread-counts"; counts: Record<string, number> }
   | { type: "unread"; room_id: string }
+  | { type: "message-edited"; id: string; room_id: string; body: string; edited_at: number }
+  | { type: "message-deleted"; id: string; room_id: string }
   | { type: string; [k: string]: unknown };
 
 /// A unique id that works outside secure contexts too. `crypto.randomUUID` is
@@ -145,6 +148,18 @@ export const online = writable<Record<string, string>>({});
 
 /// The message the composer is currently replying to (Telegram-style), or null.
 export const replyingTo = writable<ChatMessage | null>(null);
+/// The message currently being edited (composer switches to edit mode), or null.
+export const editing = writable<ChatMessage | null>(null);
+
+/// Edit a message's body (author only — server enforces).
+export function editMessage(id: string, body: string): void {
+  sendFrame({ type: "edit", id, body });
+}
+
+/// Delete a message (author or admin — server enforces).
+export function deleteMessage(id: string): void {
+  sendFrame({ type: "delete", id });
+}
 
 /// Unread anonymous-client messages per room (cleared when the room is opened).
 /// Counts even for muted rooms — muting only silences sound/popups, see notify.ts.
@@ -229,6 +244,14 @@ export function connect(): void {
       if (msg.room_id !== get(activeRoom)) return; // not the open room
       messages.update((all) => [...all, msg]);
       incomingHandler?.(msg);
+    } else if (f.type === "message-edited") {
+      const e = f as { id: string; body: string; edited_at: number };
+      messages.update((all) =>
+        all.map((m) => (m.id === e.id ? { ...m, body: e.body, edited_at: e.edited_at } : m)),
+      );
+    } else if (f.type === "message-deleted") {
+      const id = (f as { id: string }).id;
+      messages.update((all) => all.filter((m) => m.id !== id));
     } else if (f.type === "client-notice") {
       const n = (f as { notice: ClientNotice }).notice;
       // Sound/toast only (the unread count comes from the "unread" frame below,
@@ -297,6 +320,7 @@ export function joinRoom(room_id: string): void {
   if (get(activeRoom) === room_id) return;
   activeRoom.set(room_id);
   replyingTo.set(null); // a reply target doesn't carry across rooms
+  editing.set(null); // an in-progress edit doesn't carry across rooms
   clearUnread(room_id);
   messages.set([]); // history frame will repopulate
   if (ws?.readyState === WebSocket.OPEN) {

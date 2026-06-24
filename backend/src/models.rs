@@ -37,7 +37,8 @@ pub struct ChatMessage {
     /// `messages.reply_to` column (see [`crate::writer`]).
     pub reply_to: Option<ReplyPreview>,
     pub client_msg_id: Option<String>,
-    pub created_at: i64, // unix millis
+    pub created_at: i64,        // unix millis
+    pub edited_at: Option<i64>, // set when the author edits the body
     pub attachments: Vec<Attachment>,
 }
 
@@ -98,6 +99,10 @@ pub enum Inbound {
         #[serde(default)]
         reply_to: Option<String>,
     },
+    /// Edit a message's body (author only).
+    Edit { id: String, body: String },
+    /// Delete a message (author, or any admin).
+    Delete { id: String },
     /// Start (or join) the call in a room. The server replies with `call-offer`.
     CallStart { room_id: String },
     /// SDP answer to the server's offer (the server is always the offerer).
@@ -154,6 +159,15 @@ pub enum Outbound {
     },
     /// A message landed in a room you're not viewing — bump its unread badge.
     Unread { room_id: String },
+    /// A message's body was edited (live update for viewers of that room).
+    MessageEdited {
+        id: String,
+        room_id: String,
+        body: String,
+        edited_at: i64,
+    },
+    /// A message was deleted (viewers of that room remove it).
+    MessageDeleted { id: String, room_id: String },
 }
 
 /// An addressed signaling frame fanned out over the `signal` broadcast channel.

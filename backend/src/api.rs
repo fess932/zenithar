@@ -252,6 +252,7 @@ async fn build_and_deliver(
         reply_to,
         client_msg_id: None,
         created_at: now_millis(),
+        edited_at: None,
         attachments,
     };
 

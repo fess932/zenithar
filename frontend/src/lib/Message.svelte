@@ -117,6 +117,10 @@
     {/if}
 
     {#if m.body}<span class="break-words">{m.body}</span>{/if}
+    {#if m.edited_at}<span
+        class="ml-1 align-baseline text-[0.7rem] text-muted"
+        title={$t("edited")}>({$t("edited")})</span
+      >{/if}
 
     {#if m.attachments.length > 0}
       <div class="mt-1 flex flex-wrap items-start gap-2">

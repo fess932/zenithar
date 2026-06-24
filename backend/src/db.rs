@@ -8,8 +8,6 @@ use ulid::Ulid;
 
 use crate::models::{Attachment, ChatMessage, ReplyPreview, RoomSummary};
 
-const MIGRATION: &str = include_str!("../migrations/0001_init.sql");
-
 /// The single-writer pool (max 1 connection). SQLite serialises writes, so we
 /// funnel all of them through one connection — that's what lets the writer task
 /// batch many messages into one transaction. Also applies PRAGMAs + migrations.
@@ -27,9 +25,10 @@ pub async fn open_writer(path: &str) -> Result<SqlitePool> {
         .connect_with(opts)
         .await?;
 
-    // Idempotent schema (CREATE TABLE IF NOT EXISTS ...). raw_sql runs all
-    // statements in the file; good enough until we add a migration tracker.
-    sqlx::raw_sql(MIGRATION).execute(&pool).await?;
+    // Versioned migrations (tracked in `_sqlx_migrations`): each file under
+    // ./migrations runs exactly once, in order — so additive ALTERs live in their
+    // own .sql file instead of a re-run-every-boot script.
+    sqlx::migrate!().run(&pool).await?;
     Ok(pool)
 }
 
@@ -65,6 +64,7 @@ struct MsgRow {
     body: String,
     client_msg_id: Option<String>,
     created_at: i64,
+    edited_at: Option<i64>,
     // Quoted parent (NULL unless this is a reply), filled by the self-join.
     reply_id: Option<String>,
     reply_author: Option<String>,
@@ -119,6 +119,7 @@ pub async fn messages_before(
 ) -> Result<Vec<ChatMessage>> {
     const COLS: &str =
         "SELECT m.id, m.room_id, m.author_id, m.author_name, m.body, m.client_msg_id, m.created_at,
+                m.edited_at,
                 p.id AS reply_id, p.author_name AS reply_author, p.body AS reply_body,
                 EXISTS(SELECT 1 FROM attachments a WHERE a.message_id = p.id) AS reply_has_att
          FROM messages m
@@ -126,9 +127,10 @@ pub async fn messages_before(
 
     let rows = match before {
         Some(b) => {
-            sqlx::query_as::<_, MsgRow>(&format!(
+            // SQL is built only from our own constants (no user input) — safe.
+            sqlx::query_as::<_, MsgRow>(sqlx::AssertSqlSafe(format!(
                 "{COLS} WHERE m.room_id = ?1 AND m.id < ?3 ORDER BY m.id DESC LIMIT ?2"
-            ))
+            )))
             .bind(room_id)
             .bind(limit)
             .bind(b)
@@ -136,9 +138,9 @@ pub async fn messages_before(
             .await?
         }
         None => {
-            sqlx::query_as::<_, MsgRow>(&format!(
+            sqlx::query_as::<_, MsgRow>(sqlx::AssertSqlSafe(format!(
                 "{COLS} WHERE m.room_id = ?1 ORDER BY m.id DESC LIMIT ?2"
-            ))
+            )))
             .bind(room_id)
             .bind(limit)
             .fetch_all(pool)
@@ -160,7 +162,8 @@ pub async fn messages_before(
         "SELECT message_id, id, filename, content_type, size, width, height, has_thumb
          FROM attachments WHERE message_id IN ({placeholders}) ORDER BY id ASC"
     );
-    let mut q = sqlx::query_as::<_, MsgAttRow>(&att_sql);
+    // `placeholders` is `?1,?2,…` built from a count, not user input — safe.
+    let mut q = sqlx::query_as::<_, MsgAttRow>(sqlx::AssertSqlSafe(att_sql));
     for id in &ids {
         q = q.bind(*id);
     }
@@ -196,9 +199,45 @@ pub async fn messages_before(
                 reply_to,
                 client_msg_id: r.client_msg_id,
                 created_at: r.created_at,
+                edited_at: r.edited_at,
             }
         })
         .collect())
+}
+
+/// `(room_id, author_id)` for a message, or None if it doesn't exist. Used to
+/// authorize an edit/delete before applying it.
+pub async fn message_meta(reads: &SqlitePool, id: &str) -> sqlx::Result<Option<(String, String)>> {
+    sqlx::query_as::<_, (String, String)>("SELECT room_id, author_id FROM messages WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(reads)
+        .await
+}
+
+/// Replace a message body and stamp `edited_at`. Permission is checked by the
+/// caller (author only).
+pub async fn edit_message(write: &SqlitePool, id: &str, body: &str, ts: i64) -> sqlx::Result<()> {
+    sqlx::query("UPDATE messages SET body = ?2, edited_at = ?3 WHERE id = ?1")
+        .bind(id)
+        .bind(body)
+        .bind(ts)
+        .execute(write)
+        .await?;
+    Ok(())
+}
+
+/// Delete a message and its attachment rows. Permission is checked by the caller
+/// (author, or an admin). Attachment blobs on disk are left for a later GC.
+pub async fn delete_message(write: &SqlitePool, id: &str) -> sqlx::Result<()> {
+    sqlx::query("DELETE FROM attachments WHERE message_id = ?1")
+        .bind(id)
+        .execute(write)
+        .await?;
+    sqlx::query("DELETE FROM messages WHERE id = ?1")
+        .bind(id)
+        .execute(write)
+        .await?;
+    Ok(())
 }
 
 #[derive(sqlx::FromRow)]

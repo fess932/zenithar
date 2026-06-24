@@ -204,11 +204,66 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                             reply_to,
                             client_msg_id,
                             created_at: crate::now_millis(),
+                            edited_at: None,
                             attachments,
                         };
                         // Fan out + (for anonymous clients) ping employees + write.
                         if crate::send::deliver(&state, chat, !is_employee).await.is_err() {
                             break; // writer gone
+                        }
+                    }
+                    Inbound::Edit { id, body } => {
+                        if !msg_bucket.check() {
+                            debug!("edit rate-limited");
+                            continue;
+                        }
+                        let body = body.trim().to_string();
+                        if body.is_empty() || body.chars().count() > 4000 {
+                            continue;
+                        }
+                        // Author only, and only within a room this socket may act in.
+                        match db::message_meta(&state.reads, &id).await {
+                            Ok(Some((room, author))) if author == principal.id => {
+                                let in_room = client_room.as_deref().is_none_or(|r| r == room);
+                                if in_room {
+                                    let now = crate::now_millis();
+                                    if db::edit_message(&state.db, &id, &body, now).await.is_ok() {
+                                        let _ = state.signal.send(Signal {
+                                            room_id: room.clone(),
+                                            target: None,
+                                            exclude: None,
+                                            all_employees: false,
+                                            frame: Outbound::MessageEdited {
+                                                id,
+                                                room_id: room,
+                                                body,
+                                                edited_at: now,
+                                            },
+                                        });
+                                    }
+                                }
+                            }
+                            _ => debug!(msg = %id, "edit denied or message gone"),
+                        }
+                    }
+                    Inbound::Delete { id } => {
+                        // Author OR any admin; clients only within their own room.
+                        match db::message_meta(&state.reads, &id).await {
+                            Ok(Some((room, author)))
+                                if author == principal.id || principal.is_admin =>
+                            {
+                                let in_room = client_room.as_deref().is_none_or(|r| r == room);
+                                if in_room && db::delete_message(&state.db, &id).await.is_ok() {
+                                    let _ = state.signal.send(Signal {
+                                        room_id: room.clone(),
+                                        target: None,
+                                        exclude: None,
+                                        all_employees: false,
+                                        frame: Outbound::MessageDeleted { id, room_id: room },
+                                    });
+                                }
+                            }
+                            _ => debug!(msg = %id, "delete denied or message gone"),
                         }
                     }
                     Inbound::CallStart { room_id } => {

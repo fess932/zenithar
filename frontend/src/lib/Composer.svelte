@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from "./i18n";
-  import { send, uploadFile, notify, replyingTo, type Attachment } from "./chat";
+  import { send, uploadFile, notify, replyingTo, editing, editMessage, type Attachment } from "./chat";
   import { EMOJI } from "./emoji";
 
   const MAX_ATTACH = 5;
@@ -39,8 +39,31 @@
       ($replyingTo.attachments.length > 0 ? $t("attachment") : "")
     : "";
 
+  // Entering edit mode: prefill the input with the message body once (when the
+  // target changes), without clobbering what the user types afterwards.
+  let editId: string | null = null;
+  $: {
+    const cur = $editing?.id ?? null;
+    if (cur && cur !== editId) body = $editing?.body ?? "";
+    editId = cur;
+  }
+
+  function cancelEdit(): void {
+    editing.set(null);
+    body = "";
+  }
+
   function submit(e: SubmitEvent): void {
     e.preventDefault();
+    if ($editing) {
+      const text = body.trim();
+      if (text.length === 0) return; // empty edit is a no-op (delete instead)
+      editMessage($editing.id, text);
+      editing.set(null);
+      body = "";
+      showEmoji = false;
+      return;
+    }
     if (!canSend) return;
     if (
       send(
@@ -154,8 +177,27 @@
 </script>
 
 <div class="min-w-0 w-full border-t border-line bg-surface px-3 pt-[0.6rem] pb-[calc(0.6rem+env(safe-area-inset-bottom))] sm:px-5">
+  <!-- edit mode: banner above the input; submit sends an edit, not a new message -->
+  {#if $editing}
+    <div class="mb-2 flex items-center gap-2 rounded-md border-l-2 border-beacon bg-surface-2 py-1 pl-2 pr-1">
+      <span class="grid shrink-0 place-items-center text-base text-beacon">✎</span>
+      <div class="min-w-0 flex-1">
+        <div class="truncate font-mono text-[0.72rem] text-beacon">{$t("editing")}</div>
+        <div class="line-clamp-1 text-[0.8rem] text-muted">{$editing.body}</div>
+      </div>
+      <button
+        type="button"
+        onclick={cancelEdit}
+        aria-label={$t("cancelEdit")}
+        class="grid size-7 shrink-0 cursor-pointer place-items-center rounded text-muted hover:text-bad"
+      >
+        ✕
+      </button>
+    </div>
+  {/if}
+
   <!-- reply target (Telegram-style): quoted line above the input -->
-  {#if $replyingTo}
+  {#if $replyingTo && !$editing}
     <div class="mb-2 flex items-center gap-2 rounded-md border-l-2 border-beacon bg-surface-2 py-1 pl-2 pr-1">
       <span class="grid shrink-0 place-items-center text-base text-beacon">↩</span>
       <div class="min-w-0 flex-1">
@@ -276,7 +318,7 @@
         class="min-h-11 min-w-0 flex-1 rounded-md border border-line bg-surface-2 px-3 text-base text-text placeholder:text-muted focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-beacon disabled:opacity-60 sm:text-[0.9375rem]"
       />
 
-      {#if canSend}
+      {#if canSend || $editing}
         <button
           type="submit"
           aria-label={$t("send")}
