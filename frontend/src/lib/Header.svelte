@@ -102,14 +102,6 @@
           {$t("adminLinks")}
         </button>
       {/if}
-
-      <button
-        type="button"
-        onclick={openInApp}
-        class="cursor-pointer font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted hover:text-text"
-      >
-        {$t("openInApp")}
-      </button>
     {/if}
 
     {#if isEmployee}
@@ -119,12 +111,12 @@
         onclick={() => (showConnections = true)}
         title={$t("connections")}
         aria-label={$t("connections")}
-        class="beacon flex cursor-pointer items-center gap-2 font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted hover:text-text"
+        class="beacon flex cursor-pointer items-center gap-1.5 rounded-md border border-line px-2 py-1 font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted hover:text-text sm:border-0 sm:px-0 sm:py-0"
         data-state={$status}
       >
-        <span class="beacon-dot"></span><span class="hidden sm:inline"
-          >{$t(statusKey[$status])}</span
-        >
+        <span class="text-base leading-none">👥</span>
+        <span class="beacon-dot"></span>
+        <span class="hidden sm:inline">{$t(statusKey[$status])}</span>
       </button>
     {:else}
       <span
@@ -161,6 +153,13 @@
       {#if $me}
         <button
           type="button"
+          onclick={openInApp}
+          class="cursor-pointer font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted hover:text-text"
+        >
+          {$t("openInApp")}
+        </button>
+        <button
+          type="button"
           onclick={logout}
           class="cursor-pointer font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted hover:text-bad"
         >
@@ -169,7 +168,7 @@
       {/if}
     </div>
 
-    <!-- Mobile: overflow menu holding language + logout -->
+    <!-- Mobile: overflow menu holding language + open-in-app + logout -->
     <button
       type="button"
       aria-label={$t("menu")}
@@ -212,6 +211,16 @@
       </div>
 
       {#if $me}
+        <button
+          type="button"
+          onclick={() => {
+            menuOpen = false;
+            openInApp();
+          }}
+          class="cursor-pointer rounded-md py-2 font-mono text-[0.74rem] uppercase tracking-[0.08em] text-muted hover:text-text"
+        >
+          {$t("openInApp")}
+        </button>
         <button
           type="button"
           onclick={() => {
