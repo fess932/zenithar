@@ -110,6 +110,8 @@ jobs:
     needs: build-and-push
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: "27.2.12479018"
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -131,13 +133,15 @@ jobs:
       - name: Tauri deps + icons
         run: cd app && bun install && bun run tauri icon app-icon.png
 
-      - name: Android platform 36
-        run: sdkmanager "platforms;android-36"
+      - name: Install Android platform 36 + NDK
+        run: yes | sdkmanager "platforms;android-36" "ndk;$NDK_VERSION"
 
       - name: Build Android APK
-        env:
-          NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
         run: |
+          # NDK_HOME from the shell ($ANDROID_HOME is set by setup-android); the
+          # GitHub `env.*` expression context does NOT see the runner's preset
+          # ANDROID_NDK_* vars, which is why a previous attempt got an empty path.
+          export NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
           cd app
           bun run tauri android init
           # compile/targetSdk live in the generated Gradle (minSdk comes from
