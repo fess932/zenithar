@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Zenithar</title>
+    <style>
+      :root {
+        --bg: #0b0d10;
+        --surface: #14171c;
+        --line: #232830;
+        --text: #e6e9ef;
+        --muted: #8b93a1;
+        --beacon: #f5b342;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        display: grid;
+        place-items: center;
+        padding: max(1.5rem, env(safe-area-inset-top)) 1.25rem;
+        -webkit-font-smoothing: antialiased;
+      }
+      main { width: min(26rem, 100%); }
+      .mark {
+        font-size: 0.72rem;
+        letter-spacing: 0.5em;
+        color: var(--beacon);
+        text-transform: uppercase;
+        margin: 0 0 1.75rem;
+        padding-left: 0.5em;
+      }
+      h1 { font-size: 1.15rem; font-weight: 600; margin: 0 0 0.5rem; letter-spacing: -0.01em; }
+      p.sub { color: var(--muted); font-size: 0.82rem; line-height: 1.5; margin: 0 0 1.5rem; }
+      form { display: flex; gap: 0.5rem; }
+      input {
+        flex: 1;
+        min-width: 0;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 0.5rem;
+        color: var(--text);
+        font: inherit;
+        font-size: 0.85rem;
+        padding: 0.7rem 0.8rem;
+        outline: none;
+      }
+      input:focus { border-color: var(--beacon); }
+      input::placeholder { color: #5b626e; }
+      button {
+        background: var(--beacon);
+        color: #1a1205;
+        border: 0;
+        border-radius: 0.5rem;
+        font: inherit;
+        font-weight: 600;
+        font-size: 0.85rem;
+        padding: 0 1rem;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      button:active { transform: translateY(1px); }
+      .err { color: #e0606a; font-size: 0.76rem; min-height: 1.1rem; margin: 0.6rem 0 0; }
+      .hint {
+        color: var(--muted);
+        font-size: 0.74rem;
+        line-height: 1.5;
+        margin: 1.75rem 0 0;
+        padding-top: 1.25rem;
+        border-top: 1px solid var(--line);
+      }
+      .hint b { color: var(--text); font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="mark">Zenithar</p>
+      <h1 data-i18n="title">Адрес вашего сервера</h1>
+      <p class="sub" data-i18n="sub">
+        Введите домен вашего Zenithar — приложение откроет его и запомнит.
+      </p>
+      <form id="f">
+        <input
+          id="host"
+          type="text"
+          inputmode="url"
+          autocapitalize="off"
+          autocomplete="url"
+          spellcheck="false"
+          placeholder="company.example.com"
+          data-i18n-ph="ph"
+        />
+        <button type="submit" data-i18n="go">Открыть</button>
+      </form>
+      <p class="err" id="err"></p>
+      <p class="hint" data-i18n-html="hint">
+        Уже залогинены в браузере? Нажмите <b>«Открыть в приложении»</b> на сайте — приложение
+        откроется тем же пользователем.
+      </p>
+    </main>
+
+    <script>
+      const ru = (navigator.language || "").toLowerCase().startsWith("ru");
+      const T = {
+        title: ["Адрес вашего сервера", "Your server address"],
+        sub: [
+          "Введите домен вашего Zenithar — приложение откроет его и запомнит.",
+          "Enter your Zenithar domain — the app opens it and remembers it.",
+        ],
+        ph: ["company.example.com", "company.example.com"],
+        go: ["Открыть", "Open"],
+        hint: [
+          'Уже залогинены в браузере? Нажмите <b>«Открыть в приложении»</b> на сайте — приложение откроется тем же пользователем.',
+          'Already signed in on the web? Tap <b>"Open in app"</b> on the site — the app opens as the same user.',
+        ],
+        bad: ["Не удалось открыть этот адрес", "Could not open that address"],
+      };
+      const i = ru ? 0 : 1;
+      document.documentElement.lang = ru ? "ru" : "en";
+      for (const el of document.querySelectorAll("[data-i18n]"))
+        el.textContent = T[el.dataset.i18n][i];
+      for (const el of document.querySelectorAll("[data-i18n-html]"))
+        el.innerHTML = T[el.dataset.i18nHtml][i];
+      for (const el of document.querySelectorAll("[data-i18n-ph]"))
+        el.placeholder = T[el.dataset.i18nPh][i];
+
+      const err = document.getElementById("err");
+      document.getElementById("f").addEventListener("submit", (e) => {
+        e.preventDefault();
+        err.textContent = "";
+        let v = document.getElementById("host").value.trim();
+        if (!v) return;
+        if (!/^https?:\/\//i.test(v)) v = "https://" + v;
+        // open_host (Rust): validates, remembers the host, navigates the webview.
+        window.__TAURI__.core
+          .invoke("open_host", { url: v })
+          .catch(() => (err.textContent = T.bad[i]));
+      });
+    </script>
+  </body>
+</html>

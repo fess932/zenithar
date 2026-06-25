@@ -62,15 +62,25 @@ pub async fn enter_link(
     if !state.limits.login.check(&client_ip(&headers)) {
         return (StatusCode::TOO_MANY_REQUESTS, "slow down").into_response();
     }
+    // Debug aid for the desktop/mobile deep-link login: shows the request reached
+    // the server, the outcome, and the User-Agent (so app vs browser is clear).
+    let ua = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("?");
     match auth::resolve_token(&state.reads, &token).await {
         Ok(Some(p)) => match auth::create_session(&state.db, &p.id).await {
             Ok(session) => {
+                tracing::info!(principal = %p.id, %ua, "link login OK");
                 let jar = jar.add(auth::session_cookie(session, state.secure_cookies));
                 (jar, crate::index_html_response()).into_response()
             }
             Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         },
-        Ok(None) => (StatusCode::NOT_FOUND, "invalid or revoked link").into_response(),
+        Ok(None) => {
+            tracing::info!(%ua, "link login: invalid or revoked token");
+            (StatusCode::NOT_FOUND, "invalid or revoked link").into_response()
+        }
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
@@ -131,12 +141,10 @@ pub async fn app_link(
     if !origin_ok(&headers) {
         return StatusCode::FORBIDDEN.into_response();
     }
+    // Return the web login PATH; the frontend wraps it with its own origin into
+    // the `zenithar://login?u=…` deep link, so the app logs into THIS host.
     match auth::issue_token(&state.db, &p.id, None).await {
-        Ok(token) => Json(serde_json::json!({
-            "app": format!("zenithar://i/{token}"),
-            "web": format!("/i/{token}"),
-        }))
-        .into_response(),
+        Ok(token) => Json(serde_json::json!({ "web": format!("/i/{token}") })).into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }

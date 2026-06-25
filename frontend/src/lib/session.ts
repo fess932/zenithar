@@ -43,14 +43,18 @@ export async function logout(): Promise<void> {
   location.href = "/";
 }
 
-/// Mint a one-time link and hand off to the desktop app, logged in as you. The
-/// `zenithar://` URL opens the app (if installed); nothing happens otherwise.
+/// Mint a one-time link and hand off to the desktop/mobile app, logged in as you.
+/// The deep link carries THIS host's full login URL (built from `location.origin`)
+/// so the app logs into the right server — we run several hosts, each its own.
+/// Opens the app if installed; nothing happens otherwise.
 export async function openInApp(): Promise<void> {
   try {
     const r = await fetch("/api/me/app-link", { method: "POST" });
     if (!r.ok) return;
-    const { app } = (await r.json()) as { app?: string };
-    if (app) location.href = app;
+    const { web } = (await r.json()) as { web?: string };
+    if (!web) return;
+    const target = location.origin + web; // https://<this host>/i/<token>
+    location.href = `zenithar://login?u=${encodeURIComponent(target)}`;
   } catch {
     /* offline or app not installed — no-op */
   }

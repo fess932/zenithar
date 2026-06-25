@@ -1,15 +1,24 @@
 # Zenithar desktop app (Tauri v2)
 
 A thin native window (macOS + Windows for now) onto a self-hosted Zenithar server.
-The **web frontend runs unchanged** inside it: the window loads the server's own
-URL, so the web app stays same-origin and never depends on Tauri.
+The **web frontend runs unchanged** inside it on the server's own origin, so it
+stays same-origin and never depends on Tauri.
 
-## Server URL
+## Which server (no host is hard-coded)
 
-Set it in [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json) →
-`app.windows[0].url` (currently `https://chat.re-star.ru`). One build = one
-server; rebuild to point elsewhere. (A configurable URL + token provisioning is a
-planned follow-up.)
+The app is **multi-host** — nothing points at a specific server. On launch the
+window shows a bundled landing page ([`landing/`](landing/)) to enter a server
+address, and it's steered to the real host by:
+
+- a **deep link** — `zenithar://login?u=<https://host/i/<token>>`, which the web
+  app's "Open in app" builds from its **own** origin (so you land on the host you
+  came from, logged in); or
+- the **remembered last host** — after a successful login the origin is saved
+  (`app_data_dir/last_host.txt`) and reopened on the next plain launch, reusing the
+  webview's session cookie.
+
+Typing an address on the landing calls the `open_host` command (remember +
+navigate). No server URL lives in `tauri.conf.json`.
 
 ## Build locally (macOS)
 

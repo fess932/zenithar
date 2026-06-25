@@ -4,14 +4,15 @@
   "version": "0.1.0",
   "identifier": "ru.restar.zenithar",
   "build": {
-    "frontendDist": "../../frontend/dist"
+    "frontendDist": "../landing"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "label": "main",
         "title": "Zenithar",
-        "url": "https://chat.re-star.ru",
+        "url": "index.html",
         "width": 1100,
         "height": 760,
         "minWidth": 380,
