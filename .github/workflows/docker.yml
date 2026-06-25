@@ -51,6 +51,8 @@ jobs:
 
       - name: Build and push
         uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false # skip the `*.dockerbuild` provenance artifact
         with:
           context: .
           build-args: |
@@ -173,6 +175,9 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           path: dist
+          # Only our installers/APK — NOT the `*.dockerbuild` provenance artifact
+          # that build-push-action auto-uploads (downloading it was failing).
+          pattern: zenithar-*
 
       - name: Publish rolling release
         uses: softprops/action-gh-release@v2
