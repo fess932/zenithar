@@ -1,7 +1,7 @@
 <script lang="ts">
   import { lang, t } from "./i18n";
   import { status } from "./chat";
-  import { me, renameMe, logout } from "./session";
+  import { me, renameMe, logout, openInApp } from "./session";
   import Connections from "./Connections.svelte";
 
   export let onOpenAdmin: () => void;
@@ -102,6 +102,14 @@
           {$t("adminLinks")}
         </button>
       {/if}
+
+      <button
+        type="button"
+        onclick={openInApp}
+        class="cursor-pointer font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted hover:text-text"
+      >
+        {$t("openInApp")}
+      </button>
     {/if}
 
     {#if isEmployee}

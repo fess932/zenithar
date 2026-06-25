@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Baseline capability for the Zenithar shell window. The web app doesn't use Tauri IPC, so only core defaults are granted.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "deep-link:default"]
 }

@@ -307,6 +307,7 @@ async fn main() -> Result<()> {
         .route("/api/me", get(routes::me))
         .route("/api/ice", get(routes::ice_servers))
         .route("/api/me/name", post(routes::rename))
+        .route("/api/me/app-link", post(routes::app_link))
         .route("/api/rooms", get(routes::rooms))
         .route("/api/rooms/{id}/messages", get(routes::room_messages))
         .route("/api/people", get(routes::people))

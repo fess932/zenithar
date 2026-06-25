@@ -43,6 +43,19 @@ export async function logout(): Promise<void> {
   location.href = "/";
 }
 
+/// Mint a one-time link and hand off to the desktop app, logged in as you. The
+/// `zenithar://` URL opens the app (if installed); nothing happens otherwise.
+export async function openInApp(): Promise<void> {
+  try {
+    const r = await fetch("/api/me/app-link", { method: "POST" });
+    if (!r.ok) return;
+    const { app } = (await r.json()) as { app?: string };
+    if (app) location.href = app;
+  } catch {
+    /* offline or app not installed — no-op */
+  }
+}
+
 export async function renameMe(display_name: string): Promise<boolean> {
   const r = await fetch("/api/me/name", {
     method: "POST",

@@ -118,6 +118,29 @@ pub async fn rename(
     }
 }
 
+/// `POST /api/me/app-link` — mint a fresh link-token for the signed-in principal
+/// and hand back a `zenithar://i/<token>` deep link. Opening it launches the
+/// desktop app and logs it in as the same principal (the app just navigates to
+/// the existing `/i/<token>` login). The token is ADDITIVE — it doesn't revoke
+/// the user's existing link.
+pub async fn app_link(
+    State(state): State<AppState>,
+    Identity(p): Identity,
+    headers: HeaderMap,
+) -> Response {
+    if !origin_ok(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    match auth::issue_token(&state.db, &p.id, None).await {
+        Ok(token) => Json(serde_json::json!({
+            "app": format!("zenithar://i/{token}"),
+            "web": format!("/i/{token}"),
+        }))
+        .into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
 // ---- ice servers (WebRTC) --------------------------------------------------
 
 /// `GET /api/ice` — the ICE servers the browser should use (STUN/TURN), straight
