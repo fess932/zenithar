@@ -75,6 +75,13 @@ make app-android                   # tauri android init + build → debug .apk
 cd app && bun run tauri android dev   # live run on a device/emulator (hot reload)
 ```
 
+`make app-android` is self-contained on macOS: it auto-resolves `JAVA_HOME` (17),
+`ANDROID_HOME`, and `NDK_HOME`, and **installs the NDK** if `sdkmanager`
+(cmdline-tools) is present — so steps 1–4's env vars are only needed for
+`tauri android dev`. If you have neither the NDK nor cmdline-tools, the quickest
+path is `brew install --cask android-commandlinetools`, then `make app-android`
+installs the NDK for you. Override the SDK path with `make app-android ANDROID_SDK=/path`.
+
 `tauri android dev` needs a **connected phone** (USB debugging on) **or a running
 emulator** (Android Studio → Device Manager). The debug `.apk` lands in
 `app/src-tauri/gen/android/app/build/outputs/apk/…` and sideloads as-is.

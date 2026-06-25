@@ -78,6 +78,9 @@ fe-typecheck: fe-install ## Type-check frontend
 
 # ---- desktop app (Tauri) ----------------------------------------------------
 APP := app
+# Android (macOS host): SDK location + the NDK version to auto-install if missing.
+ANDROID_SDK ?= $(HOME)/Library/Android/sdk
+NDK_VERSION ?= 27.2.12479018
 
 .PHONY: app-deps
 app-deps: ## Install the Tauri CLI (one-time)
@@ -96,10 +99,32 @@ app-dev: app-deps ## Run the desktop app in a dev window (loads the live server)
 	cd $(APP) && bun run tauri dev
 
 .PHONY: app-android
-app-android: fe-build app-icons ## Build the Android app (.apk) — needs Android SDK/NDK + Java 17 (+ NDK_HOME)
-	cd $(APP) && bun run tauri android init \
-	  && perl -pi -e 's/compileSdk\s*=\s*\d+/compileSdk = 36/; s/targetSdk\s*=\s*\d+/targetSdk = 36/' src-tauri/gen/android/app/build.gradle.kts \
-	  && bun run tauri android build --apk
+app-android: fe-build app-icons ## Build the Android app (.apk); auto-resolves JDK17/SDK/NDK on macOS (installs NDK if sdkmanager is present)
+	@set -e; \
+	SDK="$(ANDROID_SDK)"; \
+	JH="$$(/usr/libexec/java_home -v 17 2>/dev/null)"; \
+	[ -n "$$JH" ] || { echo "✗ JDK 17 not found — brew install --cask temurin@17"; exit 1; }; \
+	[ -d "$$SDK" ] || { echo "✗ Android SDK not at $$SDK (override: make app-android ANDROID_SDK=/path)"; exit 1; }; \
+	NDK="$$(ls -d $$SDK/ndk/* 2>/dev/null | sort -V | tail -1)"; \
+	if [ -z "$$NDK" ]; then \
+	  SM="$$(command -v sdkmanager 2>/dev/null || true)"; \
+	  [ -n "$$SM" ] || SM="$$(ls $$SDK/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)"; \
+	  if [ -n "$$SM" ]; then \
+	    echo "→ NDK missing; installing ndk;$(NDK_VERSION) into $$SDK …"; \
+	    yes | JAVA_HOME="$$JH" "$$SM" --sdk_root="$$SDK" "ndk;$(NDK_VERSION)" >/dev/null; \
+	    NDK="$$SDK/ndk/$(NDK_VERSION)"; \
+	  else \
+	    echo "✗ No NDK and no sdkmanager to install it. Either:"; \
+	    echo "    • Android Studio → SDK Manager → SDK Tools → check 'NDK (Side by side)' → Apply, OR"; \
+	    echo "    • brew install --cask android-commandlinetools   (then re-run; make will install the NDK)"; \
+	    exit 1; \
+	  fi; \
+	fi; \
+	echo "→ JAVA_HOME=$$JH"; echo "→ ANDROID_HOME=$$SDK"; echo "→ NDK_HOME=$$NDK"; \
+	cd $(APP) && \
+	  JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" bun run tauri android init && \
+	  perl -pi -e 's/compileSdk\s*=\s*\d+/compileSdk = 36/; s/targetSdk\s*=\s*\d+/targetSdk = 36/' src-tauri/gen/android/app/build.gradle.kts && \
+	  JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" bun run tauri android build --apk --debug
 
 # ---- aggregate --------------------------------------------------------------
 .PHONY: e2e

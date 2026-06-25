@@ -51,18 +51,17 @@ fn open_token_urls(app: &tauri::AppHandle, urls: Vec<Url>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default();
+    let builder = tauri::Builder::default();
 
     // single-instance is desktop-only (Win/Linux): a 2nd launch carrying the deep
     // link focuses the running app (the `deep-link` feature forwards the URL).
+    // cfg'd shadowing (not `mut`) so mobile, where this is removed, doesn't warn.
     #[cfg(desktop)]
-    {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.set_focus();
-            }
-        }));
-    }
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        if let Some(win) = app.get_webview_window("main") {
+            let _ = win.set_focus();
+        }
+    }));
 
     builder
         .plugin(tauri_plugin_deep_link::init())

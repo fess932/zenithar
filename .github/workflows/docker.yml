@@ -62,16 +62,18 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Desktop apps (macOS + Windows) — built on their NATIVE runners (no Tauri
-  # cross-compilation). Runs AFTER the backend image so it never slows that build;
-  # skipped on PRs. Installers are uploaded as artifacts (signing comes later).
+  # Desktop apps — built on their NATIVE runners (no Tauri cross-compilation).
+  # Runs AFTER the backend image so it never slows that build; skipped on PRs.
+  # macOS is OFF here on purpose: GitHub bills macOS runners at 10× minutes, and
+  # we build the Mac app locally (`make app-mac`). Add `macos-latest` back to the
+  # matrix to re-enable it. Installers are uploaded as artifacts (signing later).
   desktop:
     needs: build-and-push
     if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
