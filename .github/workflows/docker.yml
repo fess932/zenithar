@@ -157,3 +157,32 @@ jobs:
           name: zenithar-android
           if-no-files-found: warn
           path: app/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+
+  # Rolling release: on every push to main, refresh ONE prerelease (tag `latest`)
+  # with the newest installers/APK. Filenames are stable, so each push replaces
+  # the assets instead of piling up hundreds of releases. Cut a versioned release
+  # later by pushing a `vX.Y.Z` tag (would need its own job).
+  release:
+    needs: [desktop, android]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create/update the Release
+    steps:
+      - name: Collect build artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: dist
+
+      - name: Publish rolling release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest build (dev)
+          prerelease: true
+          body: Rolling build from `main` — commit ${{ github.sha }}.
+          files: |
+            dist/**/*.exe
+            dist/**/*.msi
+            dist/**/*.dmg
+            dist/**/*.apk
