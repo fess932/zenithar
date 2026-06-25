@@ -81,6 +81,10 @@ APP := app
 # Android (macOS host): SDK location + the NDK version to auto-install if missing.
 ANDROID_SDK ?= $(HOME)/Library/Android/sdk
 NDK_VERSION ?= 27.2.12479018
+# Inject the zenithar:// deep-link intent-filter into the (regenerated) manifest:
+# Tauri's deep-link plugin only auto-adds App-Link filters, not custom schemes, so
+# without this the installed app never catches `zenithar://…` links. Idempotent.
+ANDROID_DEEPLINK_PATCH = MF=src-tauri/gen/android/app/src/main/AndroidManifest.xml; grep -q 'scheme="zenithar"' "$$MF" || perl -0pi -e 's{</intent-filter>}{</intent-filter><intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="zenithar"/></intent-filter>}' "$$MF"
 
 .PHONY: app-deps
 app-deps: ## Install the Tauri CLI (one-time)
@@ -124,6 +128,7 @@ app-android: fe-build app-icons ## Build the Android app (.apk); auto-resolves J
 	cd $(APP) && \
 	  JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" bun run tauri android init && \
 	  perl -pi -e 's/compileSdk\s*=\s*\d+/compileSdk = 36/; s/targetSdk\s*=\s*\d+/targetSdk = 36/' src-tauri/gen/android/app/build.gradle.kts && \
+	  ( $(ANDROID_DEEPLINK_PATCH) ) && \
 	  RUSTFLAGS="-C strip=debuginfo" JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" \
 	    bun run tauri android build --apk --debug --split-per-abi
 
@@ -148,6 +153,7 @@ app-android-release: fe-build app-icons ## Signed RELEASE .apk — reads ANDROID
 	cd $(APP) && \
 	  JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" bun run tauri android init && \
 	  perl -pi -e 's/compileSdk\s*=\s*\d+/compileSdk = 36/; s/targetSdk\s*=\s*\d+/targetSdk = 36/' src-tauri/gen/android/app/build.gradle.kts && \
+	  ( $(ANDROID_DEEPLINK_PATCH) ) && \
 	  rm -rf src-tauri/gen/android/app/build/outputs/apk && \
 	  RUSTFLAGS="-C strip=symbols" JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" \
 	    bun run tauri android build --apk --split-per-abi && \
