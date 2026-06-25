@@ -124,7 +124,40 @@ app-android: fe-build app-icons ## Build the Android app (.apk); auto-resolves J
 	cd $(APP) && \
 	  JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" bun run tauri android init && \
 	  perl -pi -e 's/compileSdk\s*=\s*\d+/compileSdk = 36/; s/targetSdk\s*=\s*\d+/targetSdk = 36/' src-tauri/gen/android/app/build.gradle.kts && \
-	  JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" bun run tauri android build --apk --debug
+	  RUSTFLAGS="-C strip=debuginfo" JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" \
+	    bun run tauri android build --apk --debug --split-per-abi
+
+# Signed RELEASE build (small + installable). Reads signing secrets from a
+# git-ignored `.env` at the repo root (see .env.example). Same keystore as CI.
+.PHONY: app-android-release
+app-android-release: fe-build app-icons ## Signed RELEASE .apk — reads ANDROID_KEYSTORE/_PASSWORD/_KEY_PASSWORD from .env
+	@set -e; \
+	[ -f .env ] && { set -a; . ./.env; set +a; } || { echo "✗ no .env (copy .env.example → .env, fill the ANDROID_* keys)"; exit 1; }; \
+	KS="$$ANDROID_KEYSTORE"; ALIAS="$${ANDROID_KEY_ALIAS:-zenithar}"; \
+	[ -n "$$KS" ] || { echo "✗ set ANDROID_KEYSTORE (path to zenithar.jks) in .env"; exit 1; }; \
+	case "$$KS" in /*) ;; *) KS="$$PWD/$$KS";; esac; \
+	[ -f "$$KS" ] || { echo "✗ keystore not found: $$KS"; exit 1; }; \
+	[ -n "$$ANDROID_KEYSTORE_PASSWORD" ] || { echo "✗ set ANDROID_KEYSTORE_PASSWORD in .env"; exit 1; }; \
+	[ -n "$$ANDROID_KEY_PASSWORD" ] || { echo "✗ set ANDROID_KEY_PASSWORD in .env"; exit 1; }; \
+	SDK="$(ANDROID_SDK)"; \
+	JH="$$(/usr/libexec/java_home -v 17 2>/dev/null)"; \
+	[ -n "$$JH" ] || { echo "✗ JDK 17 not found — brew install --cask temurin@17"; exit 1; }; \
+	NDK="$$(ls -d $$SDK/ndk/* 2>/dev/null | sort -V | tail -1)"; \
+	[ -n "$$NDK" ] || { echo "✗ no NDK — run 'make app-android' once to install it"; exit 1; }; \
+	echo "→ signed release with $$KS (alias $$ALIAS)"; \
+	cd $(APP) && \
+	  JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" bun run tauri android init && \
+	  perl -pi -e 's/compileSdk\s*=\s*\d+/compileSdk = 36/; s/targetSdk\s*=\s*\d+/targetSdk = 36/' src-tauri/gen/android/app/build.gradle.kts && \
+	  rm -rf src-tauri/gen/android/app/build/outputs/apk && \
+	  RUSTFLAGS="-C strip=symbols" JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" \
+	    bun run tauri android build --apk --split-per-abi && \
+	  AS="$$(ls -d $$SDK/build-tools/*/apksigner | sort -V | tail -1)"; \
+	  for apk in src-tauri/gen/android/app/build/outputs/apk/*/release/*-unsigned.apk; do \
+	    JAVA_HOME="$$JH" "$$AS" sign --ks "$$KS" --ks-pass "pass:$$ANDROID_KEYSTORE_PASSWORD" \
+	      --ks-key-alias "$$ALIAS" --key-pass "pass:$$ANDROID_KEY_PASSWORD" \
+	      --out "$${apk%-unsigned.apk}.apk" "$$apk" && rm -f "$$apk"; \
+	  done; \
+	  echo "→ signed APKs:"; ls -lh src-tauri/gen/android/app/build/outputs/apk/*/release/*.apk
 
 # ---- aggregate --------------------------------------------------------------
 .PHONY: e2e

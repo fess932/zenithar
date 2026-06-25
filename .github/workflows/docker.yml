@@ -139,6 +139,15 @@ jobs:
         run: yes | sdkmanager "platforms;android-36" "ndk;$NDK_VERSION"
 
       - name: Build Android APK
+        env:
+          # Set these 4 repo secrets to get a small, signed RELEASE build that
+          # installs. Without them we fall back to a (debug-signed) build so CI
+          # never breaks. Keep the SAME keystore across builds or Android treats
+          # an update as a different app.
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           # NDK_HOME from the shell ($ANDROID_HOME is set by setup-android); the
           # GitHub `env.*` expression context does NOT see the runner's preset
@@ -151,7 +160,24 @@ jobs:
           # if the template's syntax differs.
           perl -pi -e 's/compileSdk\s*=\s*\d+/compileSdk = 36/; s/targetSdk\s*=\s*\d+/targetSdk = 36/' \
             src-tauri/gen/android/app/build.gradle.kts || true
-          bun run tauri android build --apk --debug
+          OUT=src-tauri/gen/android/app/build/outputs/apk
+          if [ -n "$KS_B64" ]; then
+            echo "→ signed RELEASE build (optimized, small)"
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/zenithar.jks"
+            RUSTFLAGS="-C strip=symbols" bun run tauri android build --apk --split-per-abi
+            APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+            for apk in "$OUT"/*/release/*-unsigned.apk; do
+              "$APKSIGNER" sign --ks "$RUNNER_TEMP/zenithar.jks" --ks-pass "pass:$KS_PASS" \
+                --ks-key-alias "$KEY_ALIAS" --key-pass "pass:$KEY_PASS" \
+                --out "${apk%-unsigned.apk}.apk" "$apk"
+              rm -f "$apk"
+            done
+          else
+            echo "→ no keystore secret → DEBUG build (installs without a keystore)"
+            # --split-per-abi: one APK per arch (install arm64-v8a) instead of a
+            # fat universal; strip=debuginfo drops the DWARF bulk from the .so's.
+            RUSTFLAGS="-C strip=debuginfo" bun run tauri android build --apk --debug --split-per-abi
+          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v5
