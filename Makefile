@@ -95,6 +95,12 @@ app-mac: fe-build app-icons ## Build the macOS desktop app (.app/.dmg) — macOS
 app-dev: app-deps ## Run the desktop app in a dev window (loads the live server)
 	cd $(APP) && bun run tauri dev
 
+.PHONY: app-android
+app-android: fe-build app-icons ## Build the Android app (.apk) — needs Android SDK/NDK + Java 17 (+ NDK_HOME)
+	cd $(APP) && bun run tauri android init \
+	  && perl -pi -e 's/compileSdk\s*=\s*\d+/compileSdk = 36/; s/targetSdk\s*=\s*\d+/targetSdk = 36/' src-tauri/gen/android/app/build.gradle.kts \
+	  && bun run tauri android build --apk
+
 # ---- aggregate --------------------------------------------------------------
 .PHONY: e2e
 e2e: fe-build ## Run local end-to-end tests (ephemeral server on a temp DB)

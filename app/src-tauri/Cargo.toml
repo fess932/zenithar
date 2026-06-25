@@ -10,6 +10,12 @@ rust-version = "1.77"
 name = "zenithar"
 path = "src/main.rs"
 
+# Mobile (Android/iOS) builds the app as a library and calls `run()` via the
+# generated entry point; desktop links the same lib into the binary above.
+[lib]
+name = "zenithar_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
