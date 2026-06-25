@@ -73,6 +73,7 @@ const ru = {
   logout: "Выйти",
   openInApp: "Открыть в приложении",
   menu: "Меню",
+  textSize: "Размер текста",
   editNameAria: "Изменить имя",
   saveName: "Сохранить",
   // admin
@@ -183,6 +184,7 @@ const en: Record<keyof typeof ru, string> = {
   logout: "Log out",
   openInApp: "Open in app",
   menu: "Menu",
+  textSize: "Text size",
   editNameAria: "Edit name",
   saveName: "Save",
   adminLinks: "Links",

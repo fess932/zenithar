@@ -1,5 +1,6 @@
 <script lang="ts">
   import { lang, t } from "./i18n";
+  import { fontScale, FONT_SCALES } from "./uiscale";
   import { status } from "./chat";
   import { me, renameMe, logout, openInApp } from "./session";
   import Connections from "./Connections.svelte";
@@ -130,7 +131,7 @@
     {/if}
 
     <!-- Desktop: language + logout inline -->
-    <div class="hidden items-center gap-[1.1rem] sm:flex">
+    <div class="hidden items-center gap-[1.1rem] min-[900px]:flex">
       <div class="flex overflow-hidden rounded-md border border-line" role="group" aria-label="Language">
         <button
           type="button"
@@ -148,6 +149,23 @@
         >
           EN
         </button>
+      </div>
+
+      <div class="flex overflow-hidden rounded-md border border-line" role="group" aria-label={$t("textSize")}>
+        {#each FONT_SCALES as s, i}
+          <button
+            type="button"
+            aria-pressed={$fontScale === s}
+            onclick={() => fontScale.set(s)}
+            title="{$t('textSize')} · {Math.round(s * 100)}%"
+            class="cursor-pointer bg-transparent px-2 py-[0.22rem] font-mono text-[0.68rem] tracking-[0.06em] text-muted hover:text-text aria-[pressed=true]:bg-surface-2 aria-[pressed=true]:text-beacon {i >
+            0
+              ? 'border-l border-line'
+              : ''}"
+          >
+            {Math.round(s * 100)}%
+          </button>
+        {/each}
       </div>
 
       {#if $me}
@@ -174,7 +192,7 @@
       aria-label={$t("menu")}
       aria-expanded={menuOpen}
       onclick={() => (menuOpen = !menuOpen)}
-      class="grid size-9 cursor-pointer place-items-center rounded-md border border-line text-muted hover:text-text sm:hidden"
+      class="grid size-9 cursor-pointer place-items-center rounded-md border border-line text-muted hover:text-text min-[900px]:hidden"
     >
       <span class="text-lg leading-none">⋯</span>
     </button>
@@ -186,10 +204,10 @@
       type="button"
       aria-label={$t("menu")}
       onclick={() => (menuOpen = false)}
-      class="fixed inset-0 z-10 cursor-default sm:hidden"
+      class="fixed inset-0 z-10 cursor-default min-[900px]:hidden"
     ></button>
     <div
-      class="absolute right-2 top-full z-20 mt-1 flex w-44 flex-col gap-2 rounded-lg border border-line bg-surface-2 p-3 shadow-lg sm:hidden"
+      class="absolute right-2 top-full z-20 mt-1 flex w-44 flex-col gap-2 rounded-lg border border-line bg-surface-2 p-3 shadow-lg min-[900px]:hidden"
     >
       <div class="flex overflow-hidden rounded-md border border-line" role="group" aria-label="Language">
         <button
@@ -208,6 +226,22 @@
         >
           EN
         </button>
+      </div>
+
+      <div class="flex overflow-hidden rounded-md border border-line" role="group" aria-label={$t("textSize")}>
+        {#each FONT_SCALES as s, i}
+          <button
+            type="button"
+            aria-pressed={$fontScale === s}
+            onclick={() => fontScale.set(s)}
+            class="flex-1 cursor-pointer bg-transparent py-2 font-mono text-[0.72rem] tracking-[0.06em] text-muted hover:text-text aria-[pressed=true]:bg-surface aria-[pressed=true]:text-beacon {i >
+            0
+              ? 'border-l border-line'
+              : ''}"
+          >
+            {Math.round(s * 100)}%
+          </button>
+        {/each}
       </div>
 
       {#if $me}
