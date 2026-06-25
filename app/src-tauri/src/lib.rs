@@ -71,9 +71,16 @@ pub fn run() {
             #[cfg(any(windows, target_os = "linux"))]
             let _ = app.deep_link().register_all();
 
+            // Links received while the app is already running (warm).
             let handle = app.handle().clone();
             app.deep_link()
                 .on_open_url(move |event| open_token_urls(&handle, event.urls()));
+
+            // Cold start: the app was LAUNCHED by a zenithar:// link — on_open_url
+            // doesn't fire for that one, so pull the launch URL explicitly.
+            if let Ok(Some(urls)) = app.deep_link().get_current() {
+                open_token_urls(app.handle(), urls);
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
