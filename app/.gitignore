@@ -1,0 +1,8 @@
+# Rust build output
+src-tauri/target/
+# Tauri-generated code (schemas, etc.)
+src-tauri/gen/
+# Generated icon set — derived from ../app-icon.png by `tauri icon` at build time
+src-tauri/icons/
+# Node deps for the Tauri CLI
+node_modules/

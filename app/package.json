@@ -1,0 +1,12 @@
+{
+  "name": "zenithar-app",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tauri desktop wrapper for the Zenithar web client",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

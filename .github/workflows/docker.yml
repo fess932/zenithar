@@ -61,3 +61,42 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Desktop apps (macOS + Windows) — built on their NATIVE runners (no Tauri
+  # cross-compilation). Runs AFTER the backend image so it never slows that build;
+  # skipped on PRs. Installers are uploaded as artifacts (signing comes later).
+  desktop:
+    needs: build-and-push
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+
+      - name: Build web bundle (embedded fallback for the shell)
+        run: cd frontend && bun install --frozen-lockfile && bun run build
+
+      - name: Tauri deps + icons
+        run: cd app && bun install && bun run tauri icon app-icon.png
+
+      - name: Build desktop app
+        run: cd app && bun run tauri build
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: zenithar-desktop-${{ matrix.os }}
+          if-no-files-found: warn
+          path: |
+            app/src-tauri/target/release/bundle/dmg/*.dmg
+            app/src-tauri/target/release/bundle/macos/*.app
+            app/src-tauri/target/release/bundle/nsis/*.exe
+            app/src-tauri/target/release/bundle/msi/*.msi

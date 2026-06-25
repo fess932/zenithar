@@ -76,6 +76,25 @@ fe-dev: fe-install ## Rebuild frontend on change (run alongside `make dev`)
 fe-typecheck: fe-install ## Type-check frontend
 	$(BUN) bun run typecheck
 
+# ---- desktop app (Tauri) ----------------------------------------------------
+APP := app
+
+.PHONY: app-deps
+app-deps: ## Install the Tauri CLI (one-time)
+	cd $(APP) && bun install
+
+.PHONY: app-icons
+app-icons: app-deps ## Regenerate the icon set from app/app-icon.png
+	cd $(APP) && bun run tauri icon app-icon.png
+
+.PHONY: app-mac
+app-mac: fe-build app-icons ## Build the macOS desktop app (.app/.dmg) — macOS only
+	cd $(APP) && bun run tauri build
+
+.PHONY: app-dev
+app-dev: app-deps ## Run the desktop app in a dev window (loads the live server)
+	cd $(APP) && bun run tauri dev
+
 # ---- aggregate --------------------------------------------------------------
 .PHONY: e2e
 e2e: fe-build ## Run local end-to-end tests (ephemeral server on a temp DB)
