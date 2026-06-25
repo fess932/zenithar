@@ -168,6 +168,9 @@ pub enum Outbound {
     },
     /// A message was deleted (viewers of that room remove it).
     MessageDeleted { id: String, room_id: String },
+    /// The caller's room list changed (e.g. someone opened a DM with them) —
+    /// refetch `/api/rooms`. Sent targeted at the affected principal.
+    RoomsChanged,
 }
 
 /// An addressed signaling frame fanned out over the `signal` broadcast channel.

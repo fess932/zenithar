@@ -80,7 +80,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
     // a reload). The open room is marked read here and on every later switch.
     let accessible: Vec<String> = match &client_room {
         Some(room) => vec![room.clone()],
-        None => db::list_rooms_for_user(&state.reads)
+        None => db::list_rooms_for_user(&state.reads, &principal.id)
             .await
             .map(|v| v.into_iter().map(|r| r.id).collect())
             .unwrap_or_default(),
@@ -106,6 +106,10 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
             }
         }
     }
+    // Rooms this principal may see — gates cross-room unread bumps so a private
+    // DM never leaks to a non-member. Refreshed when a `rooms-changed` nudge
+    // arrives (e.g. someone opens a DM with us mid-session).
+    let mut accessible: std::collections::HashSet<String> = accessible.into_iter().collect();
 
     // Per-socket message rate limit: burst 10, ~1/s sustained.
     let mut msg_bucket = LocalBucket::new(10.0, 1.0);
@@ -149,7 +153,9 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                         // Employees may open any existing room; clients stay pinned.
                         let allowed = match &client_room {
                             Some(room) => room_id == *room,
-                            None => db::room_exists(&state.reads, &room_id).await.unwrap_or(false),
+                            None => db::staff_can_open(&state.reads, &principal.id, &room_id)
+                                .await
+                                .unwrap_or(false),
                         };
                         if !allowed {
                             debug!(room = %room_id, "join denied");
@@ -160,6 +166,9 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                         let now = crate::now_millis();
                         let _ = db::mark_read(&state.db, &principal.id, &active_room, now).await;
                         active_room = room_id;
+                        // Opening a room (e.g. a DM we just started) adds it to the
+                        // accessible set, so its unread bumps reach us afterwards.
+                        accessible.insert(active_room.clone());
                         if send_history(&mut sender, &state, &active_room).await.is_err() {
                             break;
                         }
@@ -343,6 +352,15 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                             }
                         };
                         if deliver {
+                            // A new DM with us → refresh accessible so its messages
+                            // start bumping our unread badge right away.
+                            if matches!(s.frame, Outbound::RoomsChanged) {
+                                if let Ok(v) =
+                                    db::list_rooms_for_user(&state.reads, &principal.id).await
+                                {
+                                    accessible = v.into_iter().map(|r| r.id).collect();
+                                }
+                            }
                             if let Ok(json) = serde_json::to_string(&s.frame) {
                                 if sender.send(Message::Text(json.into())).await.is_err() {
                                     break;
@@ -402,8 +420,14 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                         }
                     }
                     // Another room employees can see → bump its unread badge (not
-                    // for our own message; clients only see their own room).
-                    Ok(chat) if is_employee && chat.author_id != principal.id => {
+                    // for our own message; clients only see their own room). A
+                    // `dm-` room is private, so only its members get the bump.
+                    Ok(chat)
+                        if is_employee
+                            && chat.author_id != principal.id
+                            && (!chat.room_id.starts_with("dm-")
+                                || accessible.contains(&chat.room_id)) =>
+                    {
                         let frame = Outbound::Unread { room_id: chat.room_id };
                         if let Ok(json) = serde_json::to_string(&frame) {
                             if sender.send(Message::Text(json.into())).await.is_err() {

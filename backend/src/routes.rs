@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::auth::{
     self, Admin, Identity, IntegrationSummary, Principal, PrincipalSummary, SESSION_COOKIE,
 };
-use crate::models::RoomSummary;
+use crate::models::{Outbound, RoomSummary, Signal};
 use crate::names;
 use crate::state::AppState;
 use crate::{db, now_millis};
@@ -141,6 +141,48 @@ pub async fn app_link(
     }
 }
 
+#[derive(Deserialize)]
+pub struct DmReq {
+    pub with: String,
+}
+
+/// `POST /api/dm` — open (or create) the 1:1 direct room with another employee.
+/// Idempotent: returns the same room id from either side. Employees only.
+pub async fn start_dm(
+    State(state): State<AppState>,
+    Identity(p): Identity,
+    headers: HeaderMap,
+    Json(body): Json<DmReq>,
+) -> Response {
+    if !origin_ok(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    if p.kind != "user" {
+        return StatusCode::FORBIDDEN.into_response(); // DMs are employee↔employee
+    }
+    if body.with == p.id {
+        return (StatusCode::BAD_REQUEST, "cannot message yourself").into_response();
+    }
+    match db::principal_kind(&state.reads, &body.with).await {
+        Ok(Some(k)) if k == "user" => {}
+        _ => return (StatusCode::BAD_REQUEST, "no such teammate").into_response(),
+    }
+    match db::ensure_direct_room(&state.db, &p.id, &body.with).await {
+        Ok(room_id) => {
+            // Nudge the other side so the new DM shows in their room list.
+            let _ = state.signal.send(Signal {
+                room_id: room_id.clone(),
+                target: Some(body.with.clone()),
+                exclude: None,
+                all_employees: false,
+                frame: Outbound::RoomsChanged,
+            });
+            Json(serde_json::json!({ "room_id": room_id })).into_response()
+        }
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
 // ---- ice servers (WebRTC) --------------------------------------------------
 
 /// `GET /api/ice` — the ICE servers the browser should use (STUN/TURN), straight
@@ -161,7 +203,7 @@ pub async fn rooms(
     Identity(p): Identity,
 ) -> Result<Json<Vec<RoomSummary>>, StatusCode> {
     let list = if p.kind == "user" {
-        db::list_rooms_for_user(&state.reads)
+        db::list_rooms_for_user(&state.reads, &p.id)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     } else {
@@ -196,13 +238,11 @@ pub async fn room_messages(
     Path(room_id): Path<String>,
     Query(q): Query<HistoryQuery>,
 ) -> Response {
-    let allowed = if auth::is_staff(&p.kind) {
-        db::room_exists(&state.reads, &room_id)
-            .await
-            .unwrap_or(false)
-    } else {
-        matches!(db::room_of_client(&state.reads, &p.id).await, Ok(Some(r)) if r == room_id)
-    };
+    // Membership-aware: employees see common/client rooms + their own DMs, a
+    // client only its own room. (Was `room_exists`, which leaked DMs.)
+    let allowed = db::can_access_room(&state.reads, &p.kind, &p.id, &room_id)
+        .await
+        .unwrap_or(false);
     if !allowed {
         return StatusCode::FORBIDDEN.into_response();
     }

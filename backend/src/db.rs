@@ -374,15 +374,6 @@ pub async fn ensure_client_room(write: &SqlitePool, client_id: &str) -> sqlx::Re
     Ok(id)
 }
 
-/// Whether a room exists (employee join validation; employees may open any room).
-pub async fn room_exists(reads: &SqlitePool, room_id: &str) -> sqlx::Result<bool> {
-    let row = sqlx::query_as::<_, (i64,)>("SELECT 1 FROM rooms WHERE id = ?1 LIMIT 1")
-        .bind(room_id)
-        .fetch_optional(reads)
-        .await?;
-    Ok(row.is_some())
-}
-
 /// Whether a principal may access a room: employees see every room; a client
 /// only its own. Used to gate both chat joins and call start/join.
 pub async fn can_access_room(
@@ -392,9 +383,59 @@ pub async fn can_access_room(
     room_id: &str,
 ) -> sqlx::Result<bool> {
     if crate::auth::is_staff(principal_kind) {
-        return room_exists(reads, room_id).await;
+        return staff_can_open(reads, principal_id, room_id).await;
     }
     Ok(room_of_client(reads, principal_id).await?.as_deref() == Some(room_id))
+}
+
+/// Whether an employee may open a room: every common/client room, but a `direct`
+/// room only if they're one of its two members (DMs are private).
+pub async fn staff_can_open(
+    reads: &SqlitePool,
+    principal_id: &str,
+    room_id: &str,
+) -> sqlx::Result<bool> {
+    let ok: bool = sqlx::query_scalar(
+        "SELECT EXISTS(
+           SELECT 1 FROM rooms r WHERE r.id = ?2
+             AND (r.kind <> 'direct'
+                  OR EXISTS(SELECT 1 FROM room_members m
+                            WHERE m.room_id = r.id AND m.principal_id = ?1)))",
+    )
+    .bind(principal_id)
+    .bind(room_id)
+    .fetch_one(reads)
+    .await?;
+    Ok(ok)
+}
+
+/// Find-or-create the 1:1 direct room between two principals. The id is derived
+/// from the sorted pair, so calling it from either side returns the same room
+/// (idempotent — safe to call freely). Returns the room id.
+pub async fn ensure_direct_room(write: &SqlitePool, a: &str, b: &str) -> sqlx::Result<String> {
+    let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+    let id = format!("dm-{lo}-{hi}");
+    sqlx::query("INSERT INTO rooms (id, kind, created_at) VALUES (?1, 'direct', ?2) ON CONFLICT(id) DO NOTHING")
+        .bind(&id)
+        .bind(crate::now_millis())
+        .execute(write)
+        .await?;
+    for p in [lo, hi] {
+        sqlx::query("INSERT INTO room_members (room_id, principal_id) VALUES (?1, ?2) ON CONFLICT DO NOTHING")
+            .bind(&id)
+            .bind(p)
+            .execute(write)
+            .await?;
+    }
+    Ok(id)
+}
+
+/// A principal's kind (`user`/`client`/`bot`), or None if it doesn't exist.
+pub async fn principal_kind(reads: &SqlitePool, id: &str) -> sqlx::Result<Option<String>> {
+    sqlx::query_scalar("SELECT kind FROM principals WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(reads)
+        .await
 }
 
 /// Record the start of a call (Phase 5 later sets `recording_id` + `ended_at`).
@@ -576,13 +617,31 @@ pub async fn all_principal_names(
 
 /// Rooms an employee can see: common first, then each client room (titled with
 /// the client's display name), oldest client first.
-pub async fn list_rooms_for_user(reads: &SqlitePool) -> sqlx::Result<Vec<RoomSummary>> {
-    // The common room is always pinned first; the rest sort by most-recent
-    // activity (newest message or call), newest first, falling back to creation.
+pub async fn list_rooms_for_user(
+    reads: &SqlitePool,
+    principal_id: &str,
+) -> sqlx::Result<Vec<RoomSummary>> {
+    // Common + every client room (employees see all), plus this principal's own
+    // direct rooms (private to their two members). A direct room's title is the
+    // OTHER member's name; common is pinned first; the rest sort by latest
+    // activity (message or call), newest first, falling back to creation.
     let rooms = sqlx::query_as::<_, RoomSummary>(
-        "SELECT r.id, r.kind, p.display_name AS title, r.client_id AS client_id, r.created_at
+        "SELECT r.id, r.kind,
+           CASE WHEN r.kind = 'direct'
+                THEN (SELECT dp.display_name FROM room_members rm
+                      JOIN principals dp ON dp.id = rm.principal_id
+                      WHERE rm.room_id = r.id AND rm.principal_id <> ?1 LIMIT 1)
+                ELSE cp.display_name END AS title,
+           CASE WHEN r.kind = 'direct'
+                THEN (SELECT rm.principal_id FROM room_members rm
+                      WHERE rm.room_id = r.id AND rm.principal_id <> ?1 LIMIT 1)
+                ELSE r.client_id END AS client_id,
+           r.created_at
          FROM rooms r
-         LEFT JOIN principals p ON p.id = r.client_id
+         LEFT JOIN principals cp ON cp.id = r.client_id
+         WHERE r.kind IN ('common', 'client')
+            OR EXISTS (SELECT 1 FROM room_members rm
+                       WHERE rm.room_id = r.id AND rm.principal_id = ?1)
          ORDER BY
            (r.kind = 'common') DESC,
            MAX(
@@ -591,6 +650,7 @@ pub async fn list_rooms_for_user(reads: &SqlitePool) -> sqlx::Result<Vec<RoomSum
            ) DESC,
            r.created_at DESC, r.id DESC",
     )
+    .bind(principal_id)
     .fetch_all(reads)
     .await?;
     Ok(rooms)

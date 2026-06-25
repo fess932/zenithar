@@ -42,9 +42,10 @@ pub async fn me(ApiAuth(p): ApiAuth) -> Json<Whoami> {
 /// lets the integration map a client to its room.
 pub async fn rooms(
     State(state): State<AppState>,
-    _auth: ApiAuth,
+    ApiAuth(bot): ApiAuth,
 ) -> Result<Json<Vec<RoomSummary>>, StatusCode> {
-    db::list_rooms_for_user(&state.reads)
+    // A bot has no DMs, so this returns just common + every client room.
+    db::list_rooms_for_user(&state.reads, &bot.id)
         .await
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -60,11 +61,12 @@ pub struct PageQuery {
 /// `GET /api/v1/rooms/{id}/messages?limit&before` — a page of history, oldest-first.
 pub async fn get_messages(
     State(state): State<AppState>,
-    _auth: ApiAuth,
+    ApiAuth(bot): ApiAuth,
     Path(room_id): Path<String>,
     Query(q): Query<PageQuery>,
 ) -> Response {
-    if !db::room_exists(&state.reads, &room_id)
+    // A bot reaches common/client rooms but never DMs (it's not a member).
+    if !db::staff_can_open(&state.reads, &bot.id, &room_id)
         .await
         .unwrap_or(false)
     {
@@ -216,7 +218,7 @@ async fn build_and_deliver(
     body: SendBody,
     notify_employees: bool,
 ) -> Result<ChatMessage, (StatusCode, &'static str)> {
-    if !db::room_exists(&state.reads, room_id)
+    if !db::staff_can_open(&state.reads, &author.id, room_id)
         .await
         .unwrap_or(false)
     {

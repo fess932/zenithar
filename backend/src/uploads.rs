@@ -228,13 +228,13 @@ async fn serve_inner(state: AppState, p: Principal, id: &str, thumb: bool) -> Re
         .into_response()
 }
 
-/// Staff (employees + integration bots) may access any existing room; a client
-/// only its own.
+/// Employees may access common/client rooms + their own DMs; a client only its
+/// own room. (A bot is never a DM member, so DM attachments stay private to the
+/// two people.)
 async fn can_access(reads: &SqlitePool, p: &Principal, room_id: &str) -> bool {
-    if crate::auth::is_staff(&p.kind) {
-        return db::room_exists(reads, room_id).await.unwrap_or(false);
-    }
-    matches!(db::room_of_client(reads, &p.id).await, Ok(Some(r)) if r == room_id)
+    db::can_access_room(reads, &p.kind, &p.id, room_id)
+        .await
+        .unwrap_or(false)
 }
 
 /// Display name only (never a path). Strip directories and control chars; cap length.

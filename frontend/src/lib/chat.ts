@@ -36,9 +36,9 @@ export interface ChatMessage {
 
 export interface RoomSummary {
   id: string;
-  kind: "common" | "client";
-  title: string | null; // client name; null for the common room
-  client_id: string | null; // owning client (for its online dot); null for common
+  kind: "common" | "client" | "direct";
+  title: string | null; // client/DM-peer name; null for the common room
+  client_id: string | null; // client (or DM peer) id for the online dot; null for common
   created_at: number;
 }
 
@@ -70,6 +70,7 @@ type Frame =
   | { type: "unread"; room_id: string }
   | { type: "message-edited"; id: string; room_id: string; body: string; edited_at: number }
   | { type: "message-deleted"; id: string; room_id: string }
+  | { type: "rooms-changed" }
   | { type: string; [k: string]: unknown };
 
 /// A unique id that works outside secure contexts too. `crypto.randomUUID` is
@@ -252,6 +253,8 @@ export function connect(): void {
     } else if (f.type === "message-deleted") {
       const id = (f as { id: string }).id;
       messages.update((all) => all.filter((m) => m.id !== id));
+    } else if (f.type === "rooms-changed") {
+      void loadRooms(); // e.g. someone opened a DM with us — refresh the list
     } else if (f.type === "client-notice") {
       const n = (f as { notice: ClientNotice }).notice;
       // Sound/toast only (the unread count comes from the "unread" frame below,

@@ -1,13 +1,30 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { t } from "./i18n";
-  import { online } from "./chat";
-  import { me, listPeople, type Person } from "./session";
+  import { online, joinRoom, loadRooms } from "./chat";
+  import { me, listPeople, startDm, type Person } from "./session";
 
   export let onClose: () => void;
 
   let people: Person[] = [];
   let timer: ReturnType<typeof setInterval> | null = null;
+  let dmBusy = "";
+
+  // A teammate (employee, not yourself) can be messaged directly.
+  const canDm = (p: Person): boolean => p.kind === "user" && p.id !== $me?.id;
+
+  // Open (or create) the 1:1 room and jump into it.
+  async function openDm(p: Person): Promise<void> {
+    if (!canDm(p) || dmBusy) return;
+    dmBusy = p.id;
+    const room = await startDm(p.id);
+    dmBusy = "";
+    if (room) {
+      await loadRooms(); // make sure the new DM is in the drawer
+      joinRoom(room);
+      onClose();
+    }
+  }
 
   async function refresh(): Promise<void> {
     people = await listPeople();
@@ -74,23 +91,45 @@
 
   <ul class="min-h-0 flex-1 divide-y divide-line overflow-y-auto">
     {#each sorted as p (p.id)}
-      <li class="flex items-center gap-3 px-4 py-2.5" class:opacity-55={!isOnline(p)}>
-        <span
-          class="size-2 shrink-0 rounded-full {isOnline(p) ? 'bg-emerald-400' : 'bg-muted/40'}"
-        ></span>
-        <span class="min-w-0 flex-1 truncate text-[0.9rem]">
-          {p.name}{#if p.id === $me?.id}<span class="text-muted"> ({$t("you")})</span>{/if}
-        </span>
-        <span
-          class="shrink-0 font-mono text-[0.68rem] uppercase tracking-[0.06em]"
-          class:text-you={p.kind === "user"}
-          class:text-muted={p.kind !== "user"}
+      {@const dm = canDm(p)}
+      <li class:opacity-55={!isOnline(p)}>
+        <!-- A messageable teammate's row is a button → starts the DM. Others
+             (you, clients) render as a plain, non-interactive row. -->
+        <svelte:element
+          this={dm ? "button" : "div"}
+          type={dm ? "button" : undefined}
+          role={dm ? "button" : undefined}
+          onclick={dm ? () => openDm(p) : null}
+          disabled={dm ? dmBusy === p.id : undefined}
+          title={dm ? `${$t("messageAction")} @${p.name}` : undefined}
+          class="flex w-full items-center gap-3 px-4 py-2.5 text-left {dm
+            ? 'cursor-pointer hover:bg-surface-2 disabled:opacity-60'
+            : ''}"
         >
-          {p.kind === "user" ? $t("roleUser") : $t("roleClient")}
-        </span>
-        <span class="w-16 shrink-0 text-right font-mono text-[0.68rem] tabular-nums text-muted">
-          {ago(p)}
-        </span>
+          <span
+            class="size-2 shrink-0 rounded-full {isOnline(p) ? 'bg-emerald-400' : 'bg-muted/40'}"
+          ></span>
+          <span class="min-w-0 flex-1 truncate text-[0.9rem]">
+            {p.name}{#if p.id === $me?.id}<span class="text-muted"> ({$t("you")})</span>{/if}
+          </span>
+          <span
+            class="shrink-0 font-mono text-[0.68rem] uppercase tracking-[0.06em]"
+            class:text-you={p.kind === "user"}
+            class:text-muted={p.kind !== "user"}
+          >
+            {p.kind === "user" ? $t("roleUser") : $t("roleClient")}
+          </span>
+          <span class="w-16 shrink-0 text-right font-mono text-[0.68rem] tabular-nums text-muted">
+            {ago(p)}
+          </span>
+          <!-- the @-sigil affordance: tap to message (mobile-first, no hover needed) -->
+          <span
+            class="w-3 shrink-0 text-center font-mono text-[0.85rem] {dm
+              ? 'text-beacon'
+              : 'opacity-0'}"
+            aria-hidden="true">@</span
+          >
+        </svelte:element>
       </li>
     {:else}
       <li class="px-4 py-6 text-center font-mono text-[0.82rem] text-muted">{$t("noPeople")}</li>

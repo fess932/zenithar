@@ -56,6 +56,22 @@ export async function openInApp(): Promise<void> {
   }
 }
 
+/// Open (or create) the 1:1 direct room with another employee; returns its id.
+export async function startDm(withId: string): Promise<string | null> {
+  try {
+    const r = await fetch("/api/dm", {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({ with: withId }),
+    });
+    if (!r.ok) return null;
+    const { room_id } = (await r.json()) as { room_id?: string };
+    return room_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function renameMe(display_name: string): Promise<boolean> {
   const r = await fetch("/api/me/name", {
     method: "POST",

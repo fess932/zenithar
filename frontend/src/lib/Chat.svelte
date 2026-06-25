@@ -103,7 +103,9 @@
   });
 
   function roomLabel(r: RoomSummary): string {
-    return r.kind === "common" ? $t("room") : (r.title ?? "—");
+    if (r.kind === "common") return $t("room");
+    if (r.kind === "direct") return `@${r.title ?? "?"}`; // @handle = a person
+    return r.title ?? "—";
   }
 
   $: current = $rooms.find((r) => r.id === $activeRoom) ?? null;
@@ -112,8 +114,11 @@
   // Presence helpers.
   $: onlineEmployees = Object.values($online).filter((k) => k === "user").length;
   const isClientOnline = (r: RoomSummary): boolean => !!(r.client_id && $online[r.client_id]);
-  // Online dot for the header: only meaningful in a client room.
-  $: currentRoomOnline = current && current.kind === "client" ? isClientOnline(current) : null;
+  // Online dot for the header: meaningful in a client room or a DM (the peer).
+  $: currentRoomOnline =
+    current && (current.kind === "client" || current.kind === "direct")
+      ? isClientOnline(current)
+      : null;
 
   function openDrawer(): void {
     drawerOpen = true;
