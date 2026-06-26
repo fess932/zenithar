@@ -22,7 +22,12 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 serde_json = "1"
+log = "0.4"
 # Deep links: `zenithar://…` opens/focuses the app. single-instance (with its
 # deep-link feature) routes a link from a 2nd launch to the running app on Win/Linux.
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+
+# App logs → Android logcat (tag `zenithar`); stderr on desktop.
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.15"

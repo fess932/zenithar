@@ -76,7 +76,9 @@
     </style>
   </head>
   <body>
-    <main>
+    <!-- Hidden until we know there's no saved login; otherwise we redirect to the
+         host straight away, so the form never flashes. -->
+    <main hidden>
       <p class="mark">Zenithar</p>
       <h1 data-i18n="title">Адрес вашего сервера</h1>
       <p class="sub" data-i18n="sub">
@@ -103,6 +105,34 @@
     </main>
 
     <script>
+      // First: ask the native side where to go. If there's a saved login (a
+      // pending deep link, or the last host), redirect there immediately — the
+      // form never shows. Otherwise reveal the enter-server form.
+      (async () => {
+        const inv = window.__TAURI__.core.invoke;
+        try {
+          // 1. A cold-start deep-link login waiting? Remember its host, then open it.
+          const pending = await inv("pending_login");
+          if (pending) {
+            try {
+              localStorage.setItem("host", new URL(pending).origin);
+            } catch (_) {}
+            await inv("go", { url: pending });
+            return;
+          }
+          // 2. Reopen the last host we used (kept here, in the landing's storage).
+          const host = localStorage.getItem("host");
+          if (host) {
+            await inv("go", { url: host });
+            return;
+          }
+        } catch (_) {}
+        // 3. No saved login → show the enter-server form.
+        document.querySelector("main").hidden = false;
+        initForm();
+      })();
+
+      function initForm() {
       const ru = (navigator.language || "").toLowerCase().startsWith("ru");
       const T = {
         title: ["Адрес вашего сервера", "Your server address"],
@@ -134,11 +164,15 @@
         let v = document.getElementById("host").value.trim();
         if (!v) return;
         if (!/^https?:\/\//i.test(v)) v = "https://" + v;
-        // open_host (Rust): validates, remembers the host, navigates the webview.
+        // Remember the host (for next reopen) and navigate to it via Rust.
+        try {
+          localStorage.setItem("host", new URL(v).origin);
+        } catch (_) {}
         window.__TAURI__.core
-          .invoke("open_host", { url: v })
+          .invoke("go", { url: v })
           .catch(() => (err.textContent = T.bad[i]));
       });
+      }
     </script>
   </body>
 </html>

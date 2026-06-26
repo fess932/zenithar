@@ -160,10 +160,8 @@ jobs:
           # if the template's syntax differs.
           perl -pi -e 's/compileSdk\s*=\s*\d+/compileSdk = 36/; s/targetSdk\s*=\s*\d+/targetSdk = 36/' \
             src-tauri/gen/android/app/build.gradle.kts || true
-          # Register the zenithar:// deep link (Tauri's plugin only auto-adds
-          # App-Link filters, not custom schemes).
-          MF=src-tauri/gen/android/app/src/main/AndroidManifest.xml
-          grep -q 'scheme="zenithar"' "$MF" || perl -0pi -e 's{</intent-filter>}{</intent-filter><intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="zenithar"/></intent-filter>}' "$MF"
+          # Deep-link intent-filter + cold-start launch-intent forward.
+          bash scripts/patch-android.sh
           OUT=src-tauri/gen/android/app/build/outputs/apk
           if [ -n "$KS_B64" ]; then
             echo "→ signed RELEASE build (optimized, small)"

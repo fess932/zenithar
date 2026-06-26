@@ -81,10 +81,8 @@ APP := app
 # Android (macOS host): SDK location + the NDK version to auto-install if missing.
 ANDROID_SDK ?= $(HOME)/Library/Android/sdk
 NDK_VERSION ?= 27.2.12479018
-# Inject the zenithar:// deep-link intent-filter into the (regenerated) manifest:
-# Tauri's deep-link plugin only auto-adds App-Link filters, not custom schemes, so
-# without this the installed app never catches `zenithar://…` links. Idempotent.
-ANDROID_DEEPLINK_PATCH = MF=src-tauri/gen/android/app/src/main/AndroidManifest.xml; grep -q 'scheme="zenithar"' "$$MF" || perl -0pi -e 's{</intent-filter>}{</intent-filter><intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="zenithar"/></intent-filter>}' "$$MF"
+ADB ?= $(ANDROID_SDK)/platform-tools/adb
+ANDROID_DEBUG_APK = $(APP)/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
 
 .PHONY: app-deps
 app-deps: ## Install the Tauri CLI (one-time)
@@ -103,7 +101,7 @@ app-dev: app-deps ## Run the desktop app in a dev window (loads the live server)
 	cd $(APP) && bun run tauri dev
 
 .PHONY: app-android
-app-android: fe-build app-icons ## Build the Android app (.apk); auto-resolves JDK17/SDK/NDK on macOS (installs NDK if sdkmanager is present)
+app-android: fe-build app-icons ## Build the Android debug .apk (arm64 only — for a phone); auto-resolves JDK17/SDK/NDK on macOS
 	@set -e; \
 	SDK="$(ANDROID_SDK)"; \
 	JH="$$(/usr/libexec/java_home -v 17 2>/dev/null)"; \
@@ -128,9 +126,15 @@ app-android: fe-build app-icons ## Build the Android app (.apk); auto-resolves J
 	cd $(APP) && \
 	  JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" bun run tauri android init && \
 	  perl -pi -e 's/compileSdk\s*=\s*\d+/compileSdk = 36/; s/targetSdk\s*=\s*\d+/targetSdk = 36/' src-tauri/gen/android/app/build.gradle.kts && \
-	  ( $(ANDROID_DEEPLINK_PATCH) ) && \
+	  bash scripts/patch-android.sh && \
 	  RUSTFLAGS="-C strip=debuginfo" JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" \
-	    bun run tauri android build --apk --debug --split-per-abi
+	    bun run tauri android build --apk --debug --target aarch64; \
+	  echo "→ APK: $(ANDROID_DEBUG_APK)"
+
+.PHONY: app-android-install
+app-android-install: app-android ## Build the arm64 debug .apk and install it on the connected device (adb)
+	$(ADB) install -r "$(ANDROID_DEBUG_APK)"
+	@echo "→ installed com.feziv.zenithar"
 
 # Signed RELEASE build (small + installable). Reads signing secrets from a
 # git-ignored `.env` at the repo root (see .env.example). Same keystore as CI.
@@ -153,7 +157,7 @@ app-android-release: fe-build app-icons ## Signed RELEASE .apk — reads ANDROID
 	cd $(APP) && \
 	  JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" bun run tauri android init && \
 	  perl -pi -e 's/compileSdk\s*=\s*\d+/compileSdk = 36/; s/targetSdk\s*=\s*\d+/targetSdk = 36/' src-tauri/gen/android/app/build.gradle.kts && \
-	  ( $(ANDROID_DEEPLINK_PATCH) ) && \
+	  bash scripts/patch-android.sh && \
 	  rm -rf src-tauri/gen/android/app/build/outputs/apk && \
 	  RUSTFLAGS="-C strip=symbols" JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" \
 	    bun run tauri android build --apk --split-per-abi && \
