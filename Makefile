@@ -92,13 +92,15 @@ app-deps: ## Install the Tauri CLI (one-time)
 app-icons: app-deps ## Regenerate the icon set from app/app-icon.png
 	cd $(APP) && bun run tauri icon app-icon.png
 
+# Tauri reads the macOS Info.plist only from src-tauri/, so stage ours (the source
+# of truth lives in platforms/macos/; the copy is a build artifact, git-ignored).
 .PHONY: app-mac
 app-mac: fe-build app-icons ## Build the macOS desktop app (.app/.dmg) — macOS only
-	cd $(APP) && bun run tauri build
+	cd $(APP) && cp platforms/macos/Info.plist src-tauri/Info.plist && bun run tauri build
 
 .PHONY: app-dev
 app-dev: app-deps ## Run the desktop app in a dev window (loads the live server)
-	cd $(APP) && bun run tauri dev
+	cd $(APP) && cp platforms/macos/Info.plist src-tauri/Info.plist && bun run tauri dev
 
 .PHONY: app-android
 app-android: fe-build app-icons ## Build the Android debug .apk (arm64 only — for a phone); auto-resolves JDK17/SDK/NDK on macOS
@@ -126,7 +128,7 @@ app-android: fe-build app-icons ## Build the Android debug .apk (arm64 only — 
 	cd $(APP) && \
 	  JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" bun run tauri android init && \
 	  perl -pi -e 's/compileSdk\s*=\s*\d+/compileSdk = 36/; s/targetSdk\s*=\s*\d+/targetSdk = 36/' src-tauri/gen/android/app/build.gradle.kts && \
-	  bash scripts/patch-android.sh && \
+	  bash platforms/android/patch.sh && \
 	  RUSTFLAGS="-C strip=debuginfo" JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" \
 	    bun run tauri android build --apk --debug --target aarch64; \
 	  echo "→ APK: $(ANDROID_DEBUG_APK)"
@@ -157,7 +159,7 @@ app-android-release: fe-build app-icons ## Signed RELEASE .apk — reads ANDROID
 	cd $(APP) && \
 	  JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" bun run tauri android init && \
 	  perl -pi -e 's/compileSdk\s*=\s*\d+/compileSdk = 36/; s/targetSdk\s*=\s*\d+/targetSdk = 36/' src-tauri/gen/android/app/build.gradle.kts && \
-	  bash scripts/patch-android.sh && \
+	  bash platforms/android/patch.sh && \
 	  rm -rf src-tauri/gen/android/app/build/outputs/apk && \
 	  RUSTFLAGS="-C strip=symbols" JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" \
 	    bun run tauri android build --apk --split-per-abi && \

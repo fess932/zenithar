@@ -161,7 +161,7 @@ jobs:
           perl -pi -e 's/compileSdk\s*=\s*\d+/compileSdk = 36/; s/targetSdk\s*=\s*\d+/targetSdk = 36/' \
             src-tauri/gen/android/app/build.gradle.kts || true
           # Deep-link intent-filter + cold-start launch-intent forward.
-          bash scripts/patch-android.sh
+          bash platforms/android/patch.sh
           OUT=src-tauri/gen/android/app/build/outputs/apk
           if [ -n "$KS_B64" ]; then
             echo "→ signed RELEASE build (optimized, small)"

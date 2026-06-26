@@ -38,7 +38,7 @@
       "minSdkVersion": 24
     },
     "macOS": {
-      "entitlements": "Entitlements.plist"
+      "entitlements": "../platforms/macos/Entitlements.plist"
     },
     "icon": [
       "icons/32x32.png",

@@ -2,6 +2,8 @@
 src-tauri/target/
 # Tauri-generated code (schemas, etc.)
 src-tauri/gen/
+# Staged at build from platforms/macos/Info.plist (Tauri reads it only from here)
+src-tauri/Info.plist
 # Generated icon set — derived from ../app-icon.png by `tauri icon` at build time
 src-tauri/icons/
 # Node deps for the Tauri CLI
