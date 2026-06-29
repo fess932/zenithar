@@ -430,6 +430,79 @@ pub async fn ensure_direct_room(write: &SqlitePool, a: &str, b: &str) -> sqlx::R
     Ok(id)
 }
 
+/// Everyone who should be *notified* about a message in `room_id`: employees for
+/// common/client rooms, the client for their own room, and the two members of a
+/// direct room. Bots are excluded (they have no devices). The caller still filters
+/// out the author and anyone currently online.
+pub async fn room_audience(reads: &SqlitePool, room_id: &str) -> sqlx::Result<Vec<String>> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT p.id FROM principals p
+         WHERE (p.kind = 'user'
+                  AND (SELECT kind FROM rooms WHERE id = ?1) IN ('common', 'client'))
+            OR p.id = (SELECT client_id FROM rooms WHERE id = ?1)
+            OR EXISTS (SELECT 1 FROM room_members m
+                       WHERE m.room_id = ?1 AND m.principal_id = p.id)",
+    )
+    .bind(room_id)
+    .fetch_all(reads)
+    .await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
+/// Register (or re-point) a device push token. Keyed on the token, so the same
+/// device re-registering is idempotent and a device that logs in as someone else
+/// just moves to the new principal.
+pub async fn upsert_push_token(
+    write: &SqlitePool,
+    token: &str,
+    principal_id: &str,
+    platform: &str,
+    ts: i64,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO push_tokens (token, principal_id, platform, created_at) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(token) DO UPDATE SET principal_id = ?2, platform = ?3, created_at = ?4",
+    )
+    .bind(token)
+    .bind(principal_id)
+    .bind(platform)
+    .bind(ts)
+    .execute(write)
+    .await?;
+    Ok(())
+}
+
+/// Drop a push token (on logout, or when FCM reports it unregistered).
+pub async fn delete_push_token(write: &SqlitePool, token: &str) -> sqlx::Result<()> {
+    sqlx::query("DELETE FROM push_tokens WHERE token = ?1")
+        .bind(token)
+        .execute(write)
+        .await?;
+    Ok(())
+}
+
+/// All `(token, principal_id)` device tokens for the given principals (for push
+/// fan-out). Empty input → empty result (no query).
+pub async fn tokens_for_principals(
+    reads: &SqlitePool,
+    ids: &[String],
+) -> sqlx::Result<Vec<(String, String)>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = (1..=ids.len())
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    // `placeholders` is `?1,?2,…` from a count, not user input — safe.
+    let sql = format!("SELECT token, principal_id FROM push_tokens WHERE principal_id IN ({placeholders})");
+    let mut q = sqlx::query_as::<_, (String, String)>(sqlx::AssertSqlSafe(sql));
+    for id in ids {
+        q = q.bind(id);
+    }
+    q.fetch_all(reads).await
+}
+
 /// A principal's kind (`user`/`client`/`bot`), or None if it doesn't exist.
 pub async fn principal_kind(reads: &SqlitePool, id: &str) -> sqlx::Result<Option<String>> {
     sqlx::query_scalar("SELECT kind FROM principals WHERE id = ?1")

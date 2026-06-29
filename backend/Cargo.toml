@@ -39,9 +39,17 @@ opentelemetry-otlp = { version = "0.32.0", features = [
     "reqwest-blocking-client",
 ] }
 tracing-opentelemetry = "0.33.0"
-# Only used to reverse-proxy the local GreptimeDB dashboard over plain HTTP/1 —
-# no TLS/http2 (avoids pulling h2), keeping it light.
-reqwest = { version = "0.13.4", default-features = false }
+# Reverse-proxies the local GreptimeDB dashboard (plain HTTP/1) AND sends FCM push
+# over HTTPS. `rustls-no-provider` keeps it OpenSSL-free and shares the SAME crypto
+# provider as the `rtc` stack (ring) — pulling reqwest's default (aws-lc-rs) would
+# put two providers in the process and make rustls' auto-detect panic. `http2` for
+# Google's endpoints; `json`/`form` for the FCM/OAuth bodies.
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "form", "rustls-no-provider", "http2"] }
+# Direct handle on rustls only to install ring as the process-wide crypto provider
+# at startup (shared by rtc + reqwest). Matches the version rtc pulls.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# Sign the service-account JWT (RS256) used to mint FCM OAuth2 access tokens.
+jsonwebtoken = "9"
 audiopus = "0.2.0"
 
 [profile.dev]

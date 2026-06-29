@@ -16,7 +16,8 @@
         "width": 1100,
         "height": 760,
         "minWidth": 380,
-        "minHeight": 520
+        "minHeight": 520,
+        "useHttpsScheme": true
       }
     ],
     "security": {

@@ -9,7 +9,7 @@ use axum::routing::{any, get, post};
 use axum::Router;
 use tokio::sync::broadcast;
 use tower_http::trace::TraceLayer;
-use tracing::info;
+use tracing::{error, info};
 
 mod api;
 mod auth;
@@ -19,6 +19,7 @@ mod db;
 mod models;
 mod names;
 mod presence;
+mod push;
 mod ratelimit;
 mod recordings;
 mod routes;
@@ -159,6 +160,10 @@ async fn main() -> Result<()> {
         std::process::exit(run_healthcheck());
     }
 
+    // Install ring as the process-wide rustls crypto provider, shared by both the
+    // `rtc` call stack and reqwest (FCM push). Idempotent; ignore if already set.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     // Console logs always; OTLP trace export only if ZENITHAR_OTLP_ENDPOINT is set.
     // The provider lives for the whole process (never shut down) — see telemetry.
     telemetry::init();
@@ -286,6 +291,20 @@ async fn main() -> Result<()> {
         });
     }
 
+    // FCM offline push, if a service-account JSON is configured. A bad path is
+    // fatal (misconfiguration), but an absent one just disables push.
+    let push = match push::Fcm::from_env(std::env::var("ZENITHAR_FCM_CREDENTIALS").ok()) {
+        Ok(Some(fcm)) => {
+            info!("FCM push enabled");
+            Some(Arc::new(fcm))
+        }
+        Ok(None) => None,
+        Err(e) => {
+            error!(error = %e, "FCM credentials configured but unusable — push disabled");
+            None
+        }
+    };
+
     let state = AppState {
         writes: write_tx,
         broadcast: broadcast_tx,
@@ -299,6 +318,7 @@ async fn main() -> Result<()> {
         limits: Arc::new(ratelimit::Limits::default()),
         secure_cookies,
         recordings_dir,
+        push,
     };
 
     let app = Router::new()
@@ -308,6 +328,8 @@ async fn main() -> Result<()> {
         .route("/api/ice", get(routes::ice_servers))
         .route("/api/me/name", post(routes::rename))
         .route("/api/me/app-link", post(routes::app_link))
+        .route("/api/push/register", post(routes::push_register))
+        .route("/api/push/unregister", post(routes::push_unregister))
         .route("/api/dm", post(routes::start_dm))
         .route("/api/rooms", get(routes::rooms))
         .route("/api/rooms/{id}/messages", get(routes::room_messages))

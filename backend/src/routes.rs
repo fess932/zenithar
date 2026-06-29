@@ -150,6 +150,55 @@ pub async fn app_link(
 }
 
 #[derive(Deserialize)]
+pub struct PushTokenReq {
+    pub token: String,
+    #[serde(default = "default_platform")]
+    pub platform: String,
+}
+
+fn default_platform() -> String {
+    "android".to_string()
+}
+
+/// `POST /api/push/register` — store this device's FCM token for the signed-in
+/// principal, so messages that arrive while they're offline reach the device as
+/// a push notification. Idempotent (keyed on the token).
+pub async fn push_register(
+    State(state): State<AppState>,
+    Identity(p): Identity,
+    headers: HeaderMap,
+    Json(body): Json<PushTokenReq>,
+) -> Response {
+    if !origin_ok(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let token = body.token.trim();
+    if token.is_empty() || token.len() > 4096 {
+        return (StatusCode::BAD_REQUEST, "invalid token").into_response();
+    }
+    match db::upsert_push_token(&state.db, token, &p.id, &body.platform, now_millis()).await {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+/// `POST /api/push/unregister` — forget a device token (logout / opt-out).
+pub async fn push_unregister(
+    State(state): State<AppState>,
+    Identity(_p): Identity,
+    headers: HeaderMap,
+    Json(body): Json<PushTokenReq>,
+) -> Response {
+    if !origin_ok(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    match db::delete_push_token(&state.db, body.token.trim()).await {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+#[derive(Deserialize)]
 pub struct DmReq {
     pub with: String,
 }

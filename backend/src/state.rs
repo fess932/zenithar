@@ -38,4 +38,7 @@ pub struct AppState {
     /// Where call recordings (`<call_id>.<participant_id>.ogg`) live on disk;
     /// the admin recordings page lists + streams from here.
     pub recordings_dir: PathBuf,
+    /// FCM sender for offline push, or None when no credentials are configured
+    /// (push disabled — the rest of the app is unaffected).
+    pub push: Option<Arc<crate::push::Fcm>>,
 }

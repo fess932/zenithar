@@ -36,11 +36,16 @@ PKG="$(grep -m1 '^package ' "$MAIN_ACTIVITY" | awk '{print $2}')"
 cat > "$MAIN_ACTIVITY" <<'KOTLIN'
 package __PKG__
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.webkit.CookieManager
 import androidx.activity.enableEdgeToEdge
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 
 // Login persistence via SharedPreferences (Android settings — no files): we keep
 // the current host and its session cookie, save it when the app leaves the
@@ -58,11 +63,25 @@ class MainActivity : TauriActivity() {
     // Plain relaunch → restore the saved cookie before the host loads. A deep link
     // brings its own fresh login, so skip restore there.
     if (intent?.action != Intent.ACTION_VIEW) restoreCookie()
+    askNotifications()
   }
 
   override fun onStop() {
     super.onStop()
     saveCookie()
+    // We have a fresh cookie now — (re)register our push token so messages that
+    // arrive while we're backgrounded reach us. No-op until FCM has a token.
+    PushReg.register(this)
+  }
+
+  // Android 13+ needs runtime consent to show notifications. Declared in the
+  // manifest only when FCM is wired, so this is a silent no-op otherwise.
+  private fun askNotifications() {
+    if (Build.VERSION.SDK_INT >= 33 &&
+        ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+          != PackageManager.PERMISSION_GRANTED) {
+      ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001)
+    }
   }
 
   // zenithar://login?u=<encoded https://host/i/token>  ->  "https://host"
@@ -101,3 +120,96 @@ KOTLIN
 perl -pi -e "s/__PKG__/$PKG/" "$MAIN_ACTIVITY"
 
 echo "→ android: MainActivity patched (cookie persistence via SharedPreferences)"
+
+# --- PushReg: send our FCM token to the backend ------------------------------
+# Firebase-FREE on purpose (plain HttpURLConnection), so MainActivity can call it
+# whether or not FCM is wired. Reads host+cookie (saved by MainActivity) and the
+# token (saved by the messaging service); posts to /api/push/register. No-ops
+# until all three exist.
+APP_PKG_DIR="$(dirname "$MAIN_ACTIVITY")"
+cat > "$APP_PKG_DIR/PushReg.kt" <<'KOTLIN'
+package __PKG__
+
+import android.content.Context
+import java.net.HttpURLConnection
+import java.net.URL
+
+object PushReg {
+  fun register(ctx: Context) {
+    val p = ctx.getSharedPreferences("zenithar", Context.MODE_PRIVATE)
+    val host = p.getString("host", null) ?: return
+    val cookie = p.getString("cookie", null) ?: return
+    val token = p.getString("fcm_token", null) ?: return
+    Thread {
+      try {
+        val c = (URL("$host/api/push/register").openConnection() as HttpURLConnection).apply {
+          requestMethod = "POST"
+          doOutput = true
+          connectTimeout = 8000
+          readTimeout = 8000
+          setRequestProperty("Content-Type", "application/json")
+          setRequestProperty("Cookie", cookie)
+        }
+        val body = "{\"token\":${jsonStr(token)},\"platform\":\"android\"}"
+        c.outputStream.use { it.write(body.toByteArray()) }
+        c.responseCode // fire the request; status is enough
+        c.disconnect()
+      } catch (e: Exception) {
+      }
+    }.start()
+  }
+
+  private fun jsonStr(s: String) =
+    "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+}
+KOTLIN
+perl -pi -e "s/__PKG__/$PKG/" "$APP_PKG_DIR/PushReg.kt"
+
+# --- Firebase Cloud Messaging (only when google-services.json is provided) ----
+# Drop your Firebase Android config at platforms/android/google-services.json to
+# enable push. Without it, none of the Firebase Gradle/manifest/code is applied,
+# so the app builds and runs exactly as before — just without notifications.
+GS="platforms/android/google-services.json"
+SVC="$APP_PKG_DIR/ZenitharMessagingService.kt"
+if [ -f "$GS" ]; then
+  cp "$GS" "$GEN/app/google-services.json"
+
+  # Root Gradle: the google-services plugin classpath.
+  ROOT_GRADLE="$GEN/build.gradle.kts"
+  grep -q 'google-services' "$ROOT_GRADLE" || perl -0pi -e 's{(classpath\("org\.jetbrains\.kotlin:kotlin-gradle-plugin[^\n]*\n)}{$1        classpath("com.google.gms:google-services:4.4.2")\n}' "$ROOT_GRADLE"
+
+  # App Gradle: Firebase Messaging (via BoM) + apply the plugin.
+  APP_GRADLE="$GEN/app/build.gradle.kts"
+  grep -q 'firebase-bom' "$APP_GRADLE" || perl -0pi -e 's{(implementation\("androidx\.webkit:webkit[^\n]*\n)}{$1    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))\n    implementation("com.google.firebase:firebase-messaging")\n}' "$APP_GRADLE"
+  grep -q 'com.google.gms.google-services' "$APP_GRADLE" || printf '\napply(plugin = "com.google.gms.google-services")\n' >> "$APP_GRADLE"
+
+  # Manifest: notification permission + the messaging service.
+  grep -q 'POST_NOTIFICATIONS' "$MF" || perl -0pi -e 's{(<uses-permission android:name="android.permission.INTERNET"\s*/>)}{$1\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>}' "$MF"
+  grep -q 'ZenitharMessagingService' "$MF" || perl -0pi -e "s{(\\s*</application>)}{\n        <service android:name=\"$PKG.ZenitharMessagingService\" android:exported=\"false\">\n            <intent-filter>\n                <action android:name=\"com.google.firebase.MESSAGING_EVENT\"/>\n            </intent-filter>\n        </service>\$1}" "$MF"
+
+  # The service (Firebase-dependent — created only here). Persists the token and
+  # registers it; backgrounded "notification" pushes are drawn by the system.
+  cat > "$SVC" <<'KOTLIN'
+package __PKG__
+
+import com.google.firebase.messaging.FirebaseMessagingService
+import com.google.firebase.messaging.RemoteMessage
+
+class ZenitharMessagingService : FirebaseMessagingService() {
+  override fun onNewToken(token: String) {
+    getSharedPreferences("zenithar", MODE_PRIVATE).edit().putString("fcm_token", token).apply()
+    PushReg.register(this)
+  }
+
+  override fun onMessageReceived(message: RemoteMessage) {
+    // Foreground only — backgrounded notifications are shown by the system, and
+    // the live web UI already surfaces the message. Nothing to do for now.
+  }
+}
+KOTLIN
+  perl -pi -e "s/__PKG__/$PKG/" "$SVC"
+  echo "→ android: FCM wired (google-services.json present)"
+else
+  rm -f "$SVC"
+  echo "→ android: FCM off (drop platforms/android/google-services.json to enable)"
+fi
