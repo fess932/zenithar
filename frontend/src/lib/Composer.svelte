@@ -3,6 +3,7 @@
   import { t } from "./i18n";
   import { send, sendSticker, uploadFile, notify, replyingTo, editing, editMessage, MAX_UPLOAD_BYTES, type Attachment } from "./chat";
   import { EMOJI } from "./emoji";
+  import { getMicStream } from "./mic";
   import Sticker from "./Sticker.svelte";
   import { STICKERS } from "./stickers";
   import { listSaved, sendSaved, uploadSaved, savedThumb, savedUrl, type SavedItem } from "./saved";
@@ -231,9 +232,7 @@
   // ---- voice ----------------------------------------------------------------
   async function startRecording(): Promise<void> {
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
+      stream = await getMicStream();
     } catch {
       return; // permission denied / no mic
     }

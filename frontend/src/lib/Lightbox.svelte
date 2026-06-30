@@ -70,7 +70,7 @@
     aria-label={$t("dismiss")}
     onclick={closeLightbox}
     transition:fade={{ duration: ms(160) }}
-    class="fixed inset-0 z-50 cursor-zoom-out bg-black/85 backdrop-blur-sm"
+    class="fixed inset-0 z-[70] cursor-zoom-out bg-black/85 backdrop-blur-sm"
   ></button>
 
   <!-- Content layer sits above the backdrop. It ignores pointer events so any
@@ -78,7 +78,7 @@
        the bits you can actually interact with re-enable them. -->
   <div
     transition:scale={{ start: 0.97, opacity: 0, duration: ms(180), easing: quintOut }}
-    class="pointer-events-none fixed inset-0 z-50 flex flex-col"
+    class="pointer-events-none fixed inset-0 z-[70] flex flex-col"
   >
     <div
       class="pointer-events-auto flex items-center gap-3 px-4 py-3 pt-[calc(0.75rem+env(safe-area-inset-top))]"
@@ -91,18 +91,20 @@
           {state.index + 1} / {state.items.length}
         </span>
       {/if}
-      <button
-        type="button"
-        onclick={save}
-        disabled={saving}
-        aria-label={$t("saveImage")}
-        title={$t("saveImage")}
-        class="grid size-9 shrink-0 cursor-pointer place-items-center rounded-md border text-lg disabled:opacity-50 {savedOk
-          ? 'border-emerald-400/60 text-emerald-400'
-          : 'border-white/20 text-white/80 hover:border-white/60 hover:text-white'}"
-      >
-        {savedOk ? "✓" : "🔖"}
-      </button>
+      {#if current.saveable !== false}
+        <button
+          type="button"
+          onclick={save}
+          disabled={saving}
+          aria-label={$t("saveImage")}
+          title={$t("saveImage")}
+          class="grid size-9 shrink-0 cursor-pointer place-items-center rounded-md border text-lg disabled:opacity-50 {savedOk
+            ? 'border-emerald-400/60 text-emerald-400'
+            : 'border-white/20 text-white/80 hover:border-white/60 hover:text-white'}"
+        >
+          {savedOk ? "✓" : "🔖"}
+        </button>
+      {/if}
       <a
         href={current.src}
         download={current.filename}

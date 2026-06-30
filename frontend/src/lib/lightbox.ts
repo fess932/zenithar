@@ -11,6 +11,7 @@ export interface LightboxItem {
   src: string; // full-resolution URL
   alt: string;
   filename: string;
+  saveable?: boolean; // show the "save to сохранёнки" button (default true)
 }
 
 interface LightboxState {
@@ -41,6 +42,13 @@ export function openLightbox(attachmentId: string): void {
   if (items.length === 0) return;
   const found = items.findIndex((i) => i.id === attachmentId);
   lightbox.set({ items, index: found < 0 ? 0 : found });
+}
+
+/// Open the viewer on an arbitrary gallery (e.g. saved items, an avatar) — not
+/// tied to the message transcript. Same swipe/arrow navigation.
+export function openGallery(items: LightboxItem[], index: number): void {
+  if (items.length === 0) return;
+  lightbox.set({ items, index: Math.max(0, Math.min(index, items.length - 1)) });
 }
 
 export function closeLightbox(): void {

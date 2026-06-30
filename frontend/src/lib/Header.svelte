@@ -5,6 +5,7 @@
   import { callState, startCall } from "./call";
   import { me, renameMe, logout, openInApp } from "./session";
   import { openProfile } from "./profile";
+  import { selectedMic, listMics, type MicDevice } from "./mic";
   import { isApp } from "./platform";
   import Connections from "./Connections.svelte";
   import Avatar from "./Avatar.svelte";
@@ -35,6 +36,14 @@
   let editing = false;
   let draft = "";
   let menuOpen = false;
+
+  // Microphone picker (calls + voice notes). Devices are enumerated when the menu
+  // opens; labels need a prior permission grant, else they're numbered.
+  let mics: MicDevice[] | null = null;
+  async function loadMics(): Promise<void> {
+    mics = await listMics();
+  }
+  $: if (menuOpen && mics === null) void loadMics();
   let showConnections = false;
   let showAvatarEditor = false;
 
@@ -312,6 +321,21 @@
             {Math.round(s * 100)}%
           </button>
         {/each}
+      </div>
+
+      <!-- Microphone for calls + voice notes (handy on desktop with several mics). -->
+      <div class="flex items-center gap-2 rounded-md border border-line px-2 py-1">
+        <span class="shrink-0 text-base leading-none">🎤</span>
+        <select
+          bind:value={$selectedMic}
+          aria-label={$t("microphone")}
+          class="min-w-0 flex-1 cursor-pointer bg-surface-2 py-1 font-mono text-[0.72rem] text-text outline-none"
+        >
+          <option value="">{$t("micDefault")}</option>
+          {#each mics ?? [] as m (m.deviceId)}
+            <option value={m.deviceId}>{m.label}</option>
+          {/each}
+        </select>
       </div>
 
       <!-- "Open in app" hands off to the desktop/mobile app — pointless (and

@@ -5,6 +5,7 @@
 import { get, writable } from "svelte/store";
 import { onSignal, sendFrame, notify, joinRoom } from "./chat";
 import { isMuted } from "./notify";
+import { getMicStream } from "./mic";
 import { t } from "./i18n";
 
 export type CallState = "idle" | "ringing" | "connecting" | "live";
@@ -370,9 +371,7 @@ export function toggleMute(): void {
 async function onOffer(id: string, sdp: string): Promise<void> {
   callId = id;
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
+    localStream = await getMicStream();
   } catch {
     // No mic / denied — tell the user instead of failing silently.
     notify(get(t)("callNoMic"));

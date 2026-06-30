@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { fly, fade } from "svelte/transition";
+  import { fly } from "svelte/transition";
   import { me } from "./session";
   import { t } from "./i18n";
   import Avatar from "./Avatar.svelte";
@@ -14,6 +14,7 @@
     savedUrl,
     type SavedItem,
   } from "./saved";
+  import { lightbox, openGallery, type LightboxItem } from "./lightbox";
   import type { ProfileTarget } from "./profile";
 
   export let target: ProfileTarget;
@@ -24,8 +25,24 @@
 
   let items: SavedItem[] = [];
   let loading = true;
-  let full: { url: string; video: boolean } | null = null; // full-screen view target
   let fileInput: HTMLInputElement;
+
+  // Open the saved grid as a full-screen swipeable gallery (shared with messages).
+  function viewSaved(index: number): void {
+    openGallery(
+      items.map(
+        (it): LightboxItem => ({
+          id: it.id,
+          kind: it.content_type.startsWith("video/") ? "video" : "image",
+          src: savedUrl(it.id),
+          alt: it.filename,
+          filename: it.filename,
+          saveable: false, // already saved
+        }),
+      ),
+      index,
+    );
+  }
 
   async function onPicked(e: Event): Promise<void> {
     const input = e.target as HTMLInputElement;
@@ -57,8 +74,8 @@
 
   function onKey(e: KeyboardEvent): void {
     if (e.key !== "Escape") return;
-    if (full) full = null;
-    else onClose();
+    if ($lightbox) return; // the open gallery handles its own Escape
+    onClose();
   }
 </script>
 
@@ -87,7 +104,21 @@
   <div class="flex flex-col items-center gap-2 px-4 py-6">
     <button
       type="button"
-      onclick={() => isPhoto && (full = { url: `/api/avatars/${target.id}`, video: false })}
+      onclick={() =>
+        isPhoto &&
+        openGallery(
+          [
+            {
+              id: target.id,
+              kind: "image",
+              src: `/api/avatars/${target.id}`,
+              alt: target.name,
+              filename: target.name,
+              saveable: false,
+            },
+          ],
+          0,
+        )}
       class:cursor-zoom-in={isPhoto}
       class:cursor-default={!isPhoto}
       aria-label={target.name}
@@ -120,12 +151,11 @@
             +
           </button>
         {/if}
-        {#each items as it (it.id)}
+        {#each items as it, i (it.id)}
           <div class="relative aspect-square overflow-hidden rounded-md border border-line">
             <button
               type="button"
-              onclick={() =>
-                (full = { url: savedUrl(it.id), video: it.content_type.startsWith("video/") })}
+              onclick={() => viewSaved(i)}
               class="block size-full cursor-zoom-in"
             >
               {#if it.content_type.startsWith("video/")}
@@ -183,27 +213,3 @@
     {/if}
   </div>
 </div>
-
-<!-- full-screen view (image or video) -->
-{#if full}
-  <div transition:fade={{ duration: 120 }} class="fixed inset-0 z-[60] grid place-items-center bg-black/85 p-4">
-    <button
-      type="button"
-      onclick={() => (full = null)}
-      aria-label={$t("close")}
-      class="absolute inset-0 cursor-zoom-out"
-    ></button>
-    {#if full.video}
-      <!-- svelte-ignore a11y_media_has_caption -->
-      <video
-        src={full.url}
-        controls
-        autoplay
-        playsinline
-        class="relative max-h-full max-w-full rounded-md object-contain"
-      ></video>
-    {:else}
-      <img src={full.url} alt="" class="relative max-h-full max-w-full rounded-md object-contain" />
-    {/if}
-  </div>
-{/if}
