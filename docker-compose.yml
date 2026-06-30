@@ -51,6 +51,12 @@ services:
       # service). If the endpoint is unreachable, batches are dropped and the app
       # is unaffected.
       ZENITHAR_OTLP_ENDPOINT: "http://127.0.0.1:4000/v1/otlp"
+      # --- Android push (Firebase Cloud Messaging) ------------------------------
+      # No env needed: drop the service-account JSON at /opt/zenithar/data/fcm-sa.json
+      # on the host (it's the mounted /data volume → /data/fcm-sa.json in the
+      # container) and redeploy. Boot log then shows "FCM push enabled"; without
+      # the file it logs "FCM push disabled — no credentials file" and runs as
+      # before. To use a different path, set ZENITHAR_FCM_CREDENTIALS.
     restart: unless-stopped
 
   # Metrics/traces store (started by default; remove this service to drop it).

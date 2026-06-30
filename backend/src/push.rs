@@ -9,8 +9,11 @@
 //! account's private key and exchange it for an OAuth2 access token, cached
 //! until just before it expires. No Google SDK — just HTTPS + a JWT.
 //!
-//! Disabled unless `ZENITHAR_FCM_CREDENTIALS` points at the service-account JSON;
-//! a self-host without it runs exactly as before (no push).
+//! Push is enabled by dropping the service-account JSON at
+//! [`DEFAULT_CREDENTIALS_PATH`] (`/data/fcm-sa.json` — inside the mounted data
+//! volume). No env needed; `ZENITHAR_FCM_CREDENTIALS` only overrides the path
+//! (handy for local dev). The file's absence is logged and the server runs
+//! exactly as before (no push).
 
 use std::sync::Mutex;
 
@@ -19,6 +22,10 @@ use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 
 const SCOPE: &str = "https://www.googleapis.com/auth/firebase.messaging";
+
+/// Where we look for the FCM service-account JSON by default. Sits inside the
+/// container's mounted `/data` volume, so a self-host just drops the file there.
+pub const DEFAULT_CREDENTIALS_PATH: &str = "/data/fcm-sa.json";
 
 /// The bits of a Google service-account JSON we use.
 #[derive(Deserialize)]
@@ -62,14 +69,15 @@ pub struct Fcm {
 }
 
 impl Fcm {
-    /// Load from a service-account JSON file. Returns `Ok(None)` if `path` is
-    /// empty (feature off); `Err` only if a path is given but unusable.
-    pub fn from_env(path: Option<String>) -> Result<Option<Self>> {
-        let Some(path) = path.filter(|p| !p.is_empty()) else {
-            return Ok(None);
+    /// Load the service-account JSON from `path`. `Ok(None)` means the file isn't
+    /// there yet (push simply off); `Err` means it's present but broken (bad JSON
+    /// or key) — worth surfacing loudly.
+    pub fn load(path: &str) -> Result<Option<Self>> {
+        let raw = match std::fs::read_to_string(path) {
+            Ok(raw) => raw,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e).with_context(|| format!("reading FCM credentials at {path}")),
         };
-        let raw = std::fs::read_to_string(&path)
-            .with_context(|| format!("reading FCM credentials at {path}"))?;
         let sa: ServiceAccount =
             serde_json::from_str(&raw).context("parsing FCM service-account JSON")?;
         let key = EncodingKey::from_rsa_pem(sa.private_key.as_bytes())

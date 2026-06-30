@@ -292,16 +292,22 @@ async fn main() -> Result<()> {
         });
     }
 
-    // FCM offline push, if a service-account JSON is configured. A bad path is
-    // fatal (misconfiguration), but an absent one just disables push.
-    let push = match push::Fcm::from_env(std::env::var("ZENITHAR_FCM_CREDENTIALS").ok()) {
+    // FCM offline push: drop the service-account JSON at /data/fcm-sa.json (the
+    // mounted volume) to enable it. ZENITHAR_FCM_CREDENTIALS only overrides that
+    // path. A missing file just disables push; a present-but-broken one is loud.
+    let fcm_path = std::env::var("ZENITHAR_FCM_CREDENTIALS")
+        .unwrap_or_else(|_| push::DEFAULT_CREDENTIALS_PATH.to_string());
+    let push = match push::Fcm::load(&fcm_path) {
         Ok(Some(fcm)) => {
-            info!("FCM push enabled");
+            info!(path = %fcm_path, "FCM push enabled");
             Some(Arc::new(fcm))
         }
-        Ok(None) => None,
+        Ok(None) => {
+            info!(path = %fcm_path, "FCM push disabled — no credentials file (drop the service-account JSON there to enable)");
+            None
+        }
         Err(e) => {
-            error!(error = %e, "FCM credentials configured but unusable — push disabled");
+            error!(error = %e, path = %fcm_path, "FCM credentials present but unusable — push disabled");
             None
         }
     };
