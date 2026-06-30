@@ -199,6 +199,14 @@ pub enum Outbound {
         room_id: String,
         reactions: Vec<Reaction>,
     },
+    /// Someone reacted to YOUR message — a light, quiet nudge (not a message).
+    /// Targeted at the message author only.
+    ReactionNotice {
+        room_id: String,
+        message_id: String,
+        emoji: String,
+        from_name: String,
+    },
     /// The caller's room list changed (e.g. someone opened a DM with them) —
     /// refetch `/api/rooms`. Sent targeted at the affected principal.
     RoomsChanged,

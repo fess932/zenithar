@@ -6,10 +6,12 @@ import { writable, get } from "svelte/store";
 import {
   onClientNotice,
   onIncoming,
+  onReactionNotice,
   unread,
   joinRoom,
   uuid,
   type ClientNotice,
+  type ReactionNotice,
 } from "./chat";
 import { me } from "./session";
 
@@ -21,6 +23,16 @@ export interface Toast {
 }
 
 export const toasts = writable<Toast[]>([]);
+
+/// A reaction-on-your-message nudge: just an emoji + who, no message preview.
+export interface ReactionToast {
+  id: string;
+  room_id: string;
+  from_name: string;
+  emoji: string;
+}
+
+export const reactionToasts = writable<ReactionToast[]>([]);
 
 // ---- per-room mute (persisted) ---------------------------------------------
 
@@ -129,6 +141,25 @@ export function openToast(toast: Toast): void {
   dismissToast(toast.id);
 }
 
+// ---- reaction toasts (quiet "someone reacted to your message" nudges) -------
+
+function pushReactionToast(r: ReactionNotice): void {
+  const id = uuid();
+  reactionToasts.update((list) =>
+    [...list, { id, room_id: r.room_id, from_name: r.from_name, emoji: r.emoji }].slice(-MAX_TOASTS),
+  );
+  setTimeout(() => dismissReactionToast(id), TOAST_MS);
+}
+
+export function dismissReactionToast(id: string): void {
+  reactionToasts.update((list) => list.filter((x) => x.id !== id));
+}
+
+export function openReactionToast(t: ReactionToast): void {
+  joinRoom(t.room_id);
+  dismissReactionToast(t.id);
+}
+
 // ---- tab title badge --------------------------------------------------------
 
 function applyTitleBadge(total: number): void {
@@ -165,4 +196,8 @@ export function initNotifications(): void {
     if (isMuted(m.room_id)) return;
     chime(document.visibilityState === "visible");
   });
+
+  // Someone reacted to your message: a quiet visual nudge only — no chime, no
+  // unread badge. It's a light heart, not a message.
+  onReactionNotice((r) => pushReactionToast(r));
 }

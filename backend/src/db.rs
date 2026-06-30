@@ -271,14 +271,15 @@ pub async fn delete_message(write: &SqlitePool, id: &str) -> sqlx::Result<()> {
 }
 
 /// Toggle one emoji reaction for a principal on a message: remove it if present,
-/// otherwise add it. Permission (being in the room) is checked by the caller.
+/// otherwise add it. Returns `true` if it was ADDED (so the caller can notify the
+/// author). Permission (being in the room) is checked by the caller.
 pub async fn toggle_reaction(
     write: &SqlitePool,
     message_id: &str,
     principal_id: &str,
     emoji: &str,
     ts: i64,
-) -> sqlx::Result<()> {
+) -> sqlx::Result<bool> {
     let removed = sqlx::query(
         "DELETE FROM reactions WHERE message_id = ?1 AND principal_id = ?2 AND emoji = ?3",
     )
@@ -287,19 +288,20 @@ pub async fn toggle_reaction(
     .bind(emoji)
     .execute(write)
     .await?;
-    if removed.rows_affected() == 0 {
-        sqlx::query(
-            "INSERT INTO reactions (message_id, principal_id, emoji, created_at)
-             VALUES (?1, ?2, ?3, ?4)",
-        )
-        .bind(message_id)
-        .bind(principal_id)
-        .bind(emoji)
-        .bind(ts)
-        .execute(write)
-        .await?;
+    if removed.rows_affected() > 0 {
+        return Ok(false); // it existed → toggled off
     }
-    Ok(())
+    sqlx::query(
+        "INSERT INTO reactions (message_id, principal_id, emoji, created_at)
+         VALUES (?1, ?2, ?3, ?4)",
+    )
+    .bind(message_id)
+    .bind(principal_id)
+    .bind(emoji)
+    .bind(ts)
+    .execute(write)
+    .await?;
+    Ok(true) // newly added
 }
 
 /// All reactions on one message, grouped per emoji (first-added order). Used to

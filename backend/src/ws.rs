@@ -289,32 +289,64 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                         }
                         // Anyone in the room may react (not just the author).
                         match db::message_meta(&state.reads, &id).await {
-                            Ok(Some((room, _author))) => {
+                            Ok(Some((room, author))) => {
                                 let in_room = client_room.as_deref().is_none_or(|r| r == room);
-                                if in_room
-                                    && db::toggle_reaction(
-                                        &state.db,
-                                        &id,
-                                        &principal.id,
-                                        &emoji,
-                                        crate::now_millis(),
-                                    )
-                                    .await
-                                    .is_ok()
+                                if !in_room {
+                                    continue;
+                                }
+                                let added = match db::toggle_reaction(
+                                    &state.db,
+                                    &id,
+                                    &principal.id,
+                                    &emoji,
+                                    crate::now_millis(),
+                                )
+                                .await
                                 {
-                                    let reactions = db::reactions_for_message(&state.reads, &id)
-                                        .await
-                                        .unwrap_or_default();
+                                    Ok(a) => a,
+                                    Err(_) => {
+                                        debug!(msg = %id, "react: toggle failed");
+                                        continue;
+                                    }
+                                };
+                                // Live chip update for everyone viewing the room.
+                                let reactions = db::reactions_for_message(&state.reads, &id)
+                                    .await
+                                    .unwrap_or_default();
+                                let _ = state.signal.send(Signal {
+                                    room_id: room.clone(),
+                                    target: None,
+                                    exclude: None,
+                                    all_employees: false,
+                                    frame: Outbound::MessageReaction {
+                                        id: id.clone(),
+                                        room_id: room.clone(),
+                                        reactions,
+                                    },
+                                });
+                                // A light nudge to the author — only on add, and not
+                                // when reacting to your own message. In-app toast if
+                                // they're connected; a quiet push if they're offline.
+                                if added && author != principal.id {
                                     let _ = state.signal.send(Signal {
                                         room_id: room.clone(),
-                                        target: None,
+                                        target: Some(author.clone()),
                                         exclude: None,
                                         all_employees: false,
-                                        frame: Outbound::MessageReaction {
-                                            id,
-                                            room_id: room,
-                                            reactions,
+                                        frame: Outbound::ReactionNotice {
+                                            room_id: room.clone(),
+                                            message_id: id.clone(),
+                                            emoji: emoji.clone(),
+                                            from_name: principal.display_name.clone(),
                                         },
+                                    });
+                                    let state2 = state.clone();
+                                    let from = principal.display_name.clone();
+                                    tokio::spawn(async move {
+                                        crate::send::push_reaction(
+                                            &state2, &author, &from, &emoji, &room,
+                                        )
+                                        .await;
                                     });
                                 }
                             }

@@ -68,6 +68,14 @@ export interface ClientNotice {
   created_at: number;
 }
 
+/// A light nudge that someone reacted to YOUR message (not a message itself).
+export interface ReactionNotice {
+  room_id: string;
+  message_id: string;
+  emoji: string;
+  from_name: string;
+}
+
 export type Status = "connecting" | "live" | "down";
 
 // Server → client frames. Chat frames are handled here; `call-*` signaling
@@ -83,6 +91,7 @@ type Frame =
   | { type: "message-edited"; id: string; room_id: string; body: string; edited_at: number }
   | { type: "message-deleted"; id: string; room_id: string }
   | { type: "message-reaction"; id: string; room_id: string; reactions: Reaction[] }
+  | { type: "reaction-notice"; room_id: string; message_id: string; emoji: string; from_name: string }
   | { type: "rooms-changed" }
   | { type: string; [k: string]: unknown };
 
@@ -108,6 +117,12 @@ export function onSignal(handler: (f: Frame) => void): void {
 let clientNoticeHandler: ((n: ClientNotice) => void) | null = null;
 export function onClientNotice(handler: (n: ClientNotice) => void): void {
   clientNoticeHandler = handler;
+}
+
+// The notification layer registers here for the quiet "someone reacted" nudge.
+let reactionNoticeHandler: ((r: ReactionNotice) => void) | null = null;
+export function onReactionNotice(handler: (r: ReactionNotice) => void): void {
+  reactionNoticeHandler = handler;
 }
 
 // Fires for every message that lands in the room currently open (including your
@@ -279,6 +294,10 @@ export function connect(): void {
       const e = f as { id: string; reactions: Reaction[] };
       messages.update((all) =>
         all.map((m) => (m.id === e.id ? { ...m, reactions: e.reactions ?? [] } : m)),
+      );
+    } else if (f.type === "reaction-notice") {
+      reactionNoticeHandler?.(
+        f as { room_id: string; message_id: string; emoji: string; from_name: string },
       );
     } else if (f.type === "rooms-changed") {
       void loadRooms(); // e.g. someone opened a DM with us — refresh the list

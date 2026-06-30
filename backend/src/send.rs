@@ -93,6 +93,39 @@ async fn push_offline(state: &AppState, chat: &ChatMessage) {
     }
 }
 
+/// Push a light reaction nudge to the message `author` if they're offline — a
+/// quiet "❤️" rather than a message. Online authors get the in-app toast instead.
+pub async fn push_reaction(
+    state: &AppState,
+    author_id: &str,
+    from_name: &str,
+    emoji: &str,
+    room_id: &str,
+) {
+    let Some(fcm) = &state.push else { return };
+    if state.presence.is_online(author_id) {
+        return; // online → the in-app reaction toast covers it
+    }
+    let ids = [author_id.to_string()];
+    let tokens = match crate::db::tokens_for_principals(&state.reads, &ids).await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!(error = %e, "react push: token lookup failed");
+            return;
+        }
+    };
+    let title = if from_name.is_empty() { emoji } else { from_name };
+    for (token, _pid) in tokens {
+        match fcm.send(&token, title, emoji, room_id).await {
+            Ok(true) => {}
+            Ok(false) => {
+                let _ = crate::db::delete_push_token(&state.db, &token).await;
+            }
+            Err(e) => tracing::warn!(error = %e, "react push: FCM send failed"),
+        }
+    }
+}
+
 /// A short, single-line preview for a notification: the trimmed body (capped),
 /// or a paperclip marker when the message is attachment-only.
 pub fn notice_preview(body: &str, has_attachment: bool) -> String {

@@ -30,6 +30,9 @@
     toasts,
     openToast,
     dismissToast,
+    reactionToasts,
+    openReactionToast,
+    dismissReactionToast,
     mutedRooms,
     toggleMute,
   } from "./notify";
@@ -255,8 +258,8 @@
   <!-- Long-press / click context menu for a message (reply, …) -->
   <MessageMenu />
 
-  <!-- Notification toasts: new messages from anonymous client rooms -->
-  {#if $toasts.length > 0}
+  <!-- Notification toasts: new client messages, plus quiet reaction nudges -->
+  {#if $toasts.length > 0 || $reactionToasts.length > 0}
     <div
       class="pointer-events-none fixed left-1/2 top-[calc(0.6rem+env(safe-area-inset-top))] z-50 flex w-[min(26rem,92vw)] -translate-x-1/2 flex-col gap-2"
     >
@@ -290,6 +293,32 @@
             onclick={() => dismissToast(toast.id)}
             aria-label={$t("dismiss")}
             class="grid size-7 shrink-0 cursor-pointer place-items-center rounded text-muted hover:text-text"
+          >
+            ✕
+          </button>
+        </div>
+      {/each}
+      <!-- Reaction nudges: a light heart + who, no message preview or mute. -->
+      {#each $reactionToasts as rt (rt.id)}
+        <div
+          transition:fly={{ y: -16, duration: 180 }}
+          class="pointer-events-auto flex items-center gap-2 self-center rounded-full border border-line bg-surface px-3 py-1.5 shadow-lg"
+        >
+          <button
+            type="button"
+            onclick={() => openReactionToast(rt)}
+            class="flex min-w-0 items-center gap-2 text-left"
+          >
+            <span class="text-lg leading-none">{rt.emoji}</span>
+            <span class="truncate text-[0.82rem] text-muted">
+              <span class="text-beacon">{rt.from_name}</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onclick={() => dismissReactionToast(rt.id)}
+            aria-label={$t("dismiss")}
+            class="grid size-6 shrink-0 cursor-pointer place-items-center rounded text-muted hover:text-text"
           >
             ✕
           </button>
