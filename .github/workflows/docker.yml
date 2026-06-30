@@ -148,6 +148,10 @@ jobs:
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # Firebase client config (base64 of app/platforms/android/google-services.json).
+          # It's git-ignored, so CI restores it from this secret before patch.sh
+          # picks it up and wires FCM. Absent → build still works, just no push.
+          GS_B64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
         run: |
           # NDK_HOME from the shell ($ANDROID_HOME is set by setup-android); the
           # GitHub `env.*` expression context does NOT see the runner's preset
@@ -160,7 +164,14 @@ jobs:
           # if the template's syntax differs.
           perl -pi -e 's/compileSdk\s*=\s*\d+/compileSdk = 36/; s/targetSdk\s*=\s*\d+/targetSdk = 36/' \
             src-tauri/gen/android/app/build.gradle.kts || true
-          # Deep-link intent-filter + cold-start launch-intent forward.
+          # Restore the Firebase client config (git-ignored) so patch.sh wires FCM.
+          if [ -n "$GS_B64" ]; then
+            echo "→ FCM: restoring google-services.json from secret"
+            echo "$GS_B64" | base64 -d > platforms/android/google-services.json
+          else
+            echo "→ FCM: no GOOGLE_SERVICES_JSON_BASE64 secret → push disabled in this build"
+          fi
+          # Deep-link intent-filter + cold-start launch-intent forward (+ FCM if json present).
           bash platforms/android/patch.sh
           OUT=src-tauri/gen/android/app/build/outputs/apk
           if [ -n "$KS_B64" ]; then
