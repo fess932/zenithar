@@ -10,6 +10,8 @@
   let pending: Attachment[] = [];
   let uploading = false;
   let showEmoji = false;
+  // Picker tabs. Stickers/GIFs are placeholders for now — UI is ready, content TBD.
+  let pickerTab: "emoji" | "stickers" | "gifs" = "emoji";
 
   let fileInput: HTMLInputElement;
   let inputEl: HTMLInputElement;
@@ -343,19 +345,39 @@
     </div>
   {/if}
 
-  <!-- emoji panel -->
+  <!-- emoji / stickers / gifs panel -->
   {#if showEmoji}
-    <div class="mb-2 max-h-44 overflow-y-auto rounded-md border border-line bg-surface-2 p-2">
-      <div class="grid grid-cols-[repeat(auto-fill,minmax(2.25rem,1fr))] gap-1">
-        {#each EMOJI as em}
+    <div class="mb-2 overflow-hidden rounded-md border border-line bg-surface-2">
+      <!-- tabs -->
+      <div class="flex border-b border-line">
+        {#each [{ id: "emoji", label: $t("emoji") }, { id: "stickers", label: $t("stickers") }, { id: "gifs", label: $t("gifs") }] as tab}
           <button
             type="button"
-            onclick={() => addEmoji(em)}
-            class="grid aspect-square cursor-pointer place-items-center rounded text-lg hover:bg-surface"
+            onclick={() => (pickerTab = tab.id as typeof pickerTab)}
+            aria-pressed={pickerTab === tab.id}
+            class="flex-1 border-b-2 border-transparent py-1.5 font-mono text-[0.7rem] uppercase tracking-[0.06em] text-muted hover:text-text aria-[pressed=true]:border-beacon aria-[pressed=true]:text-beacon"
           >
-            {em}
+            {tab.label}
           </button>
         {/each}
+      </div>
+      <!-- content -->
+      <div class="max-h-44 overflow-y-auto p-2">
+        {#if pickerTab === "emoji"}
+          <div class="grid grid-cols-[repeat(auto-fill,minmax(2.25rem,1fr))] gap-1">
+            {#each EMOJI as em}
+              <button
+                type="button"
+                onclick={() => addEmoji(em)}
+                class="grid aspect-square cursor-pointer place-items-center rounded text-lg hover:bg-surface"
+              >
+                {em}
+              </button>
+            {/each}
+          </div>
+        {:else}
+          <p class="grid place-items-center py-9 font-mono text-[0.78rem] text-muted">{$t("comingSoon")}</p>
+        {/if}
       </div>
     </div>
   {/if}
