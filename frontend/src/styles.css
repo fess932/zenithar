@@ -45,70 +45,59 @@ body {
   }
 }
 @keyframes arrived-flash {
+  /* Overlay a fading gold tint via inset shadow — works over any bubble bg
+     (surface for others, cyan tint for yours) without touching the base color. */
   from {
-    border-left-color: var(--color-beacon);
-    background: var(--color-surface-2);
+    box-shadow: inset 0 0 0 9999px rgb(232 176 75 / 0.18);
   }
   to {
-    border-left-color: transparent;
-    background: transparent;
+    box-shadow: inset 0 0 0 9999px rgb(232 176 75 / 0);
   }
 }
 
 /* Stateful / animated pieces — composed from Tailwind utilities via @apply. */
 @layer components {
-  /* Transcript row: time · who · message, collapsing on narrow screens. */
-  .line {
-    @apply grid grid-cols-[5.5rem_8rem_minmax(0,1fr)] gap-3 border-l-2 border-transparent px-5 py-[0.12rem] transition-colors duration-300;
+  /* Chat bubble: the message body in a rounded surface. Consecutive lines from
+     one author group under a single name (see .cont); yours sit right + cyan. */
+  .bubble {
+    @apply relative max-w-[85%] rounded-[1.15rem] bg-surface-2 px-3 pb-[0.4rem] pt-[0.35rem] text-[0.95rem] leading-[1.35] text-text transition-shadow sm:max-w-[34rem];
+    display: flow-root; /* contain the trailing time + any floats */
   }
-  .line .body {
-    @apply min-w-0;
+  .bubble.mine {
+    @apply bg-you/15;
   }
-  /* Briefly highlighted when you jump to a quoted original. */
-  .line.flash {
-    @apply bg-surface-2;
+  /* Continuation bubbles tuck the inner top corner so a run reads as one stack. */
+  .bubble.cont:not(.mine) {
+    @apply rounded-tl-md;
   }
-  .line:hover {
-    @apply bg-surface;
+  .bubble.cont.mine {
+    @apply rounded-tr-md;
   }
-  .line .time {
-    @apply pt-[0.12rem] text-right font-mono text-[0.74rem] text-muted;
+  /* Trailing timestamp, pinned bottom-right; the ghost (same glyphs, invisible)
+     reserves inline space so the last line never slides under it. */
+  .bubble .time {
+    @apply absolute bottom-[0.3rem] right-3 font-mono text-[0.62rem] leading-none text-muted/75;
   }
-  .line .who {
-    @apply truncate font-mono text-[0.8rem] text-muted;
+  .bubble.mine .time {
+    @apply text-you/70;
   }
-  .line .body {
-    @apply break-words;
+  .bubble .timeghost {
+    @apply pointer-events-none invisible ml-2 inline-block select-none font-mono text-[0.62rem] leading-none;
   }
-  .line.mine {
-    @apply border-you;
+  /* Jump-to-quote highlight + new-message arrival pulse. */
+  .bubble.flash {
+    @apply ring-2 ring-beacon;
   }
-  .line.mine .who {
-    @apply text-you;
-  }
-  .line.arrived {
+  .bubble.arrived {
     animation: var(--animate-arrived);
   }
 
   /* Touch: suppress the OS long-press callout/selection so our own message
      menu can take over the gesture. Desktop keeps text selectable. */
   @media (hover: none) {
-    .line {
+    .bubble {
       -webkit-touch-callout: none;
       user-select: none;
-    }
-  }
-
-  @media (max-width: 560px) {
-    .line {
-      @apply grid-cols-[4.5rem_minmax(0,1fr)] px-3;
-    }
-    .line .who {
-      @apply text-you;
-      grid-column: 2;
-    }
-    .line .time {
-      grid-row: 1 / 3;
     }
   }
 
@@ -132,7 +121,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .beacon-dot,
-  .line.arrived {
+  .bubble.arrived {
     animation: none !important;
   }
 }

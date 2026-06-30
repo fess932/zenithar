@@ -30,12 +30,12 @@ build: fe-build be-build ## Full release build: frontend embedded into the binar
 .PHONY: run
 run: fe-build ## Build frontend, then run the release server (serves embedded site)
 	@printf '\n  \033[1mZenithar\033[0m → %s\n\n' '$(URL)'
-	$(CARGO) ZENITHAR_BIND=$(BIND) cargo run --release
+	$(CARGO) set -a; [ -f .env ] && . ./.env; set +a; ZENITHAR_BIND=$(BIND) cargo run --release
 
 .PHONY: dev
 dev: fe-build ## Run the debug server (reads frontend/dist from disk; pair with `make fe-dev`)
 	@printf '\n  \033[1mZenithar dev\033[0m → %s\n\n' '$(URL)'
-	$(CARGO) ZENITHAR_BIND=$(BIND) cargo run
+	$(CARGO) set -a; [ -f .env ] && . ./.env; set +a; ZENITHAR_BIND=$(BIND) cargo run
 
 # ---- backend (Rust) ---------------------------------------------------------
 .PHONY: be-build

@@ -13,6 +13,7 @@ use tracing::{error, info};
 
 mod api;
 mod auth;
+mod avatars;
 mod calls;
 mod dashproxy;
 mod db;
@@ -327,6 +328,12 @@ async fn main() -> Result<()> {
         .route("/api/me", get(routes::me))
         .route("/api/ice", get(routes::ice_servers))
         .route("/api/me/name", post(routes::rename))
+        .route("/api/me/avatar", post(avatars::set_emoji))
+        .route(
+            "/api/me/avatar/photo",
+            post(avatars::set_photo).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
+        )
+        .route("/api/avatars/{id}", get(avatars::serve))
         .route("/api/me/app-link", post(routes::app_link))
         .route("/api/push/register", post(routes::push_register))
         .route("/api/push/unregister", post(routes::push_unregister))

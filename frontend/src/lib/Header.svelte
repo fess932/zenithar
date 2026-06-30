@@ -1,9 +1,12 @@
 <script lang="ts">
   import { lang, t } from "./i18n";
   import { fontScale, FONT_SCALES } from "./uiscale";
-  import { status } from "./chat";
+  import { status, activeRoom } from "./chat";
+  import { callState, startCall } from "./call";
   import { me, renameMe, logout, openInApp } from "./session";
   import Connections from "./Connections.svelte";
+  import Avatar from "./Avatar.svelte";
+  import AvatarEditor from "./AvatarEditor.svelte";
 
   export let onOpenAdmin: () => void;
   export let isEmployee = false;
@@ -23,9 +26,13 @@
   let draft = "";
   let menuOpen = false;
   let showConnections = false;
+  let showAvatarEditor = false;
+
+  // Only real users (not anonymous clients) own an editable name + avatar.
+  $: canEditProfile = $me?.kind === "user";
 
   function startEdit(): void {
-    if ($me?.kind !== "user") return; // clients are anonymous
+    if (!canEditProfile || !$me) return;
     draft = $me.display_name;
     editing = true;
   }
@@ -33,6 +40,10 @@
     const name = draft.trim();
     if (name) await renameMe(name);
     editing = false;
+  }
+  function openAvatarEditor(): void {
+    menuOpen = false;
+    showAvatarEditor = true;
   }
 </script>
 
@@ -55,7 +66,7 @@
           {unreadTotal}
         </span>
       {/if}
-      <span class="truncate font-mono text-[0.84rem] text-text">{roomTitle}</span>
+      <span class="truncate font-mono text-[0.9rem] text-text">{roomTitle}</span>
       {#if roomOnline !== null}
         <span
           class="size-1.5 shrink-0 rounded-full {roomOnline ? 'bg-emerald-400' : 'bg-muted/50'}"
@@ -64,45 +75,21 @@
       {/if}
     </button>
   {:else}
-    <span
-      class="text-[0.78rem] font-bold uppercase tracking-[0.2em] text-text sm:text-[0.82rem] sm:tracking-[0.22em]"
-      >Zenithar</span
-    >
+    <span class="truncate font-mono text-[0.9rem] text-text">{roomTitle}</span>
   {/if}
 
-  <div class="ml-auto flex items-center gap-2 sm:gap-[1.1rem]">
-    {#if $me}
-      {#if editing}
-        <input
-          bind:value={draft}
-          onblur={saveEdit}
-          onkeydown={(e) => e.key === "Enter" && saveEdit()}
-          maxlength="40"
-          aria-label={$t("editNameAria")}
-          class="w-32 rounded-md border border-line bg-surface-2 px-2 py-[0.3rem] font-mono text-[0.8rem] text-text focus-visible:outline-2 focus-visible:outline-beacon sm:w-36"
-        />
-      {:else}
-        <button
-          type="button"
-          onclick={startEdit}
-          title={$me.kind === "user" ? $t("editNameAria") : ""}
-          class="max-w-[34vw] truncate font-mono text-[0.78rem] text-you sm:max-w-none"
-          class:cursor-pointer={$me.kind === "user"}
-          class:cursor-default={$me.kind !== "user"}
-        >
-          {$me.display_name}
-        </button>
-      {/if}
-
-      {#if $me.is_admin}
-        <button
-          type="button"
-          onclick={onOpenAdmin}
-          class="cursor-pointer font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted hover:text-text"
-        >
-          {$t("adminLinks")}
-        </button>
-      {/if}
+  <div class="ml-auto flex items-center gap-2 sm:gap-3">
+    <!-- Place a call within the open room. Hidden once a call is up. -->
+    {#if $callState === "idle" && $activeRoom}
+      <button
+        type="button"
+        onclick={() => $activeRoom && startCall($activeRoom)}
+        aria-label={$t("call")}
+        title={$t("call")}
+        class="grid size-9 cursor-pointer place-items-center rounded-md border border-line text-muted hover:border-beacon hover:text-beacon"
+      >
+        <span class="text-base leading-none">📞</span>
+      </button>
     {/if}
 
     {#if isEmployee}
@@ -130,85 +117,85 @@
       </span>
     {/if}
 
-    <!-- Desktop: language + logout inline -->
-    <div class="hidden items-center gap-[1.1rem] min-[900px]:flex">
-      <div class="flex overflow-hidden rounded-md border border-line" role="group" aria-label="Language">
-        <button
-          type="button"
-          aria-pressed={$lang === "ru"}
-          onclick={() => lang.set("ru")}
-          class="cursor-pointer bg-transparent px-2 py-[0.22rem] font-mono text-[0.68rem] tracking-[0.06em] text-muted hover:text-text aria-[pressed=true]:bg-surface-2 aria-[pressed=true]:text-beacon"
-        >
-          RU
-        </button>
-        <button
-          type="button"
-          aria-pressed={$lang === "en"}
-          onclick={() => lang.set("en")}
-          class="cursor-pointer border-l border-line bg-transparent px-2 py-[0.22rem] font-mono text-[0.68rem] tracking-[0.06em] text-muted hover:text-text aria-[pressed=true]:bg-surface-2 aria-[pressed=true]:text-beacon"
-        >
-          EN
-        </button>
-      </div>
-
-      <div class="flex overflow-hidden rounded-md border border-line" role="group" aria-label={$t("textSize")}>
-        {#each FONT_SCALES as s, i}
-          <button
-            type="button"
-            aria-pressed={$fontScale === s}
-            onclick={() => fontScale.set(s)}
-            title="{$t('textSize')} · {Math.round(s * 100)}%"
-            class="cursor-pointer bg-transparent px-2 py-[0.22rem] font-mono text-[0.68rem] tracking-[0.06em] text-muted hover:text-text aria-[pressed=true]:bg-surface-2 aria-[pressed=true]:text-beacon {i >
-            0
-              ? 'border-l border-line'
-              : ''}"
-          >
-            {Math.round(s * 100)}%
-          </button>
-        {/each}
-      </div>
-
-      {#if $me}
-        <button
-          type="button"
-          onclick={openInApp}
-          class="cursor-pointer font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted hover:text-text"
-        >
-          {$t("openInApp")}
-        </button>
-        <button
-          type="button"
-          onclick={logout}
-          class="cursor-pointer font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted hover:text-bad"
-        >
-          {$t("logout")}
-        </button>
-      {/if}
-    </div>
-
-    <!-- Mobile: overflow menu holding language + open-in-app + logout -->
-    <button
-      type="button"
-      aria-label={$t("menu")}
-      aria-expanded={menuOpen}
-      onclick={() => (menuOpen = !menuOpen)}
-      class="grid size-9 cursor-pointer place-items-center rounded-md border border-line text-muted hover:text-text min-[900px]:hidden"
-    >
-      <span class="text-lg leading-none">⋯</span>
-    </button>
+    <!-- Profile: avatar button opens a menu holding name, avatar, admin, settings. -->
+    {#if $me}
+      <button
+        type="button"
+        onclick={() => (menuOpen = !menuOpen)}
+        aria-label={$t("profile")}
+        aria-expanded={menuOpen}
+        class="shrink-0 cursor-pointer rounded-full ring-offset-2 ring-offset-surface hover:ring-2 hover:ring-line aria-[expanded=true]:ring-2 aria-[expanded=true]:ring-beacon"
+      >
+        <Avatar id={$me.id} name={$me.display_name} avatar={$me.avatar} size={32} />
+      </button>
+    {/if}
   </div>
 
   {#if menuOpen}
     <!-- backdrop closes the menu -->
     <button
       type="button"
-      aria-label={$t("menu")}
+      aria-label={$t("close")}
       onclick={() => (menuOpen = false)}
-      class="fixed inset-0 z-10 cursor-default min-[900px]:hidden"
+      class="fixed inset-0 z-10 cursor-default"
     ></button>
     <div
-      class="absolute right-2 top-full z-20 mt-1 flex w-44 flex-col gap-2 rounded-lg border border-line bg-surface-2 p-3 shadow-lg min-[900px]:hidden"
+      class="absolute right-2 top-full z-20 mt-1 flex w-60 max-w-[88vw] flex-col gap-2 rounded-lg border border-line bg-surface-2 p-3 shadow-lg"
     >
+      <!-- Identity: avatar + name (editable for users). -->
+      <div class="flex items-center gap-3 px-1 pb-1">
+        {#if $me}
+          <Avatar id={$me.id} name={$me.display_name} avatar={$me.avatar} size={40} />
+        {/if}
+        <div class="min-w-0 flex-1">
+          {#if editing}
+            <input
+              bind:value={draft}
+              onblur={saveEdit}
+              onkeydown={(e) => e.key === "Enter" && saveEdit()}
+              maxlength="40"
+              aria-label={$t("editNameAria")}
+              class="w-full rounded-md border border-line bg-surface px-2 py-[0.3rem] font-mono text-[0.82rem] text-text focus-visible:outline-2 focus-visible:outline-beacon"
+            />
+          {:else}
+            <button
+              type="button"
+              onclick={startEdit}
+              title={canEditProfile ? $t("editNameAria") : ""}
+              class="block max-w-full truncate text-left font-mono text-[0.9rem] text-you"
+              class:cursor-pointer={canEditProfile}
+              class:cursor-default={!canEditProfile}
+            >
+              {$me?.display_name}
+            </button>
+          {/if}
+          {#if canEditProfile}
+            <button
+              type="button"
+              onclick={openAvatarEditor}
+              class="cursor-pointer font-mono text-[0.72rem] text-muted hover:text-beacon"
+            >
+              {$t("changeAvatar")}
+            </button>
+          {/if}
+        </div>
+      </div>
+
+      {#if $me?.is_admin}
+        <button
+          type="button"
+          onclick={() => {
+            menuOpen = false;
+            onOpenAdmin();
+          }}
+          class="cursor-pointer rounded-md px-1 py-2 text-left font-mono text-[0.78rem] uppercase tracking-[0.08em] text-muted hover:text-text"
+        >
+          {$t("adminLinks")}
+        </button>
+      {/if}
+
+      <div class="my-1 border-t border-line"></div>
+
       <div class="flex overflow-hidden rounded-md border border-line" role="group" aria-label="Language">
         <button
           type="button"
@@ -244,32 +231,34 @@
         {/each}
       </div>
 
-      {#if $me}
-        <button
-          type="button"
-          onclick={() => {
-            menuOpen = false;
-            openInApp();
-          }}
-          class="cursor-pointer rounded-md py-2 font-mono text-[0.74rem] uppercase tracking-[0.08em] text-muted hover:text-text"
-        >
-          {$t("openInApp")}
-        </button>
-        <button
-          type="button"
-          onclick={() => {
-            menuOpen = false;
-            logout();
-          }}
-          class="cursor-pointer rounded-md py-2 font-mono text-[0.74rem] uppercase tracking-[0.08em] text-muted hover:text-bad"
-        >
-          {$t("logout")}
-        </button>
-      {/if}
+      <button
+        type="button"
+        onclick={() => {
+          menuOpen = false;
+          openInApp();
+        }}
+        class="cursor-pointer rounded-md py-2 font-mono text-[0.74rem] uppercase tracking-[0.08em] text-muted hover:text-text"
+      >
+        {$t("openInApp")}
+      </button>
+      <button
+        type="button"
+        onclick={() => {
+          menuOpen = false;
+          logout();
+        }}
+        class="cursor-pointer rounded-md py-2 font-mono text-[0.74rem] uppercase tracking-[0.08em] text-muted hover:text-bad"
+      >
+        {$t("logout")}
+      </button>
     </div>
   {/if}
 
   {#if showConnections}
     <Connections onClose={() => (showConnections = false)} />
+  {/if}
+
+  {#if showAvatarEditor}
+    <AvatarEditor onClose={() => (showAvatarEditor = false)} />
   {/if}
 </header>

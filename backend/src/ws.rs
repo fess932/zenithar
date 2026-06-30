@@ -209,6 +209,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                             room_id: active_room.clone(),
                             author_id: principal.id.clone(),
                             author_name: principal.display_name.clone(),
+                            author_avatar: principal.avatar.clone(),
                             body,
                             reply_to,
                             client_msg_id,

@@ -13,6 +13,12 @@ data-test/
 .env
 test-results/
 
+# Firebase / FCM push — local secrets, never commit.
+# Client config (read by the Android build's patch.sh) and the server-side
+# service-account key (path goes in backend/.env as ZENITHAR_FCM_CREDENTIALS).
+app/platforms/android/google-services.json
+backend/fcm-sa.json
+
 # Frontend (bun)
 node_modules/
 frontend/dist/

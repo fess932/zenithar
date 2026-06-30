@@ -32,6 +32,9 @@ pub struct ChatMessage {
     pub room_id: String,
     pub author_id: String,
     pub author_name: String,
+    /// The author's current avatar (emoji or `"photo:<millis>"`), resolved at read
+    /// time so it stays current; None → the client renders a default emoji.
+    pub author_avatar: Option<String>,
     pub body: String,
     /// The quoted message, if this is a reply. The parent id is persisted in the
     /// `messages.reply_to` column (see [`crate::writer`]).

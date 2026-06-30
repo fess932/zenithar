@@ -61,6 +61,8 @@ struct MsgRow {
     room_id: String,
     author_id: String,
     author_name: String,
+    // The author's current avatar, joined live from principals (None if unset).
+    author_avatar: Option<String>,
     body: String,
     client_msg_id: Option<String>,
     created_at: i64,
@@ -118,12 +120,14 @@ pub async fn messages_before(
     before: Option<&str>,
 ) -> Result<Vec<ChatMessage>> {
     const COLS: &str =
-        "SELECT m.id, m.room_id, m.author_id, m.author_name, m.body, m.client_msg_id, m.created_at,
+        "SELECT m.id, m.room_id, m.author_id, m.author_name, ap.avatar AS author_avatar,
+                m.body, m.client_msg_id, m.created_at,
                 m.edited_at,
                 p.id AS reply_id, p.author_name AS reply_author, p.body AS reply_body,
                 EXISTS(SELECT 1 FROM attachments a WHERE a.message_id = p.id) AS reply_has_att
          FROM messages m
-         LEFT JOIN messages p ON p.id = m.reply_to ";
+         LEFT JOIN messages p ON p.id = m.reply_to
+         LEFT JOIN principals ap ON ap.id = m.author_id ";
 
     let rows = match before {
         Some(b) => {
@@ -195,6 +199,7 @@ pub async fn messages_before(
                 room_id: r.room_id,
                 author_id: r.author_id,
                 author_name: r.author_name,
+                author_avatar: r.author_avatar,
                 body: r.body,
                 reply_to,
                 client_msg_id: r.client_msg_id,
@@ -672,10 +677,14 @@ pub async fn save_last_seen(
 
 /// Everyone in the connections list: human principals (employees + clients),
 /// not integration bots. Online status + last-seen are overlaid from presence.
-pub async fn list_people(reads: &SqlitePool) -> sqlx::Result<Vec<(String, String, String)>> {
-    sqlx::query_as("SELECT id, display_name, kind FROM principals WHERE kind IN ('user','client')")
-        .fetch_all(reads)
-        .await
+pub async fn list_people(
+    reads: &SqlitePool,
+) -> sqlx::Result<Vec<(String, String, String, Option<String>)>> {
+    sqlx::query_as(
+        "SELECT id, display_name, kind, avatar FROM principals WHERE kind IN ('user','client')",
+    )
+    .fetch_all(reads)
+    .await
 }
 
 /// Map of principal id → display name (for labeling recording tracks by speaker).

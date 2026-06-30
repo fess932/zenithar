@@ -155,7 +155,9 @@
         <p class="px-6 py-10 font-mono text-[0.82rem] text-muted">{$t("empty")}</p>
       {:else}
         {#each $messages as m, i (m.id)}
-          {#if i === 0 || !sameDay($messages[i - 1].created_at, m.created_at)}
+          {@const prev = i > 0 ? $messages[i - 1] : null}
+          {@const newDay = !prev || !sameDay(prev.created_at, m.created_at)}
+          {#if newDay}
             <div class="my-2 flex justify-center">
               <span
                 class="rounded-full bg-surface-2 px-3 py-0.5 font-mono text-[0.7rem] text-muted"
@@ -164,7 +166,14 @@
               </span>
             </div>
           {/if}
-          <Message {m} />
+          <!-- Start a new author group on a new day, a new author, or after a
+               5-minute lull — so the name + gap only print once per run. -->
+          {@const firstInGroup =
+            newDay ||
+            !prev ||
+            prev.author_id !== m.author_id ||
+            m.created_at - prev.created_at > 5 * 60 * 1000}
+          <Message {m} {firstInGroup} />
         {/each}
       {/if}
     </main>
@@ -180,7 +189,7 @@
       aria-label={$t("scrollToBottom")}
       title={$t("scrollToBottom")}
       transition:fly={{ y: 12, duration: 150 }}
-      class="fixed bottom-40 right-4 z-30 grid size-11 cursor-pointer place-items-center rounded-full border border-line bg-surface-2 text-lg text-muted shadow-lg hover:border-beacon hover:text-beacon"
+      class="fixed bottom-24 right-4 z-30 grid size-11 cursor-pointer place-items-center rounded-full border border-line bg-surface-2 text-lg text-muted shadow-lg hover:border-beacon hover:text-beacon"
     >
       ↓
     </button>

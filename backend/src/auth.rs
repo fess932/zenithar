@@ -36,6 +36,8 @@ pub struct Principal {
     pub kind: String, // "user" | "client"
     pub display_name: String,
     pub is_admin: bool,
+    /// Emoji grapheme, `"photo:<millis>"`, or None (client renders a default).
+    pub avatar: Option<String>,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -91,6 +93,7 @@ pub async fn create_principal(
         kind: kind.to_string(),
         display_name: display_name.to_string(),
         is_admin,
+        avatar: None, // freshly created; the client draws a default until set
     })
 }
 
@@ -128,6 +131,30 @@ pub async fn set_display_name(db: &SqlitePool, principal_id: &str, name: &str) -
         .execute(db)
         .await?;
     Ok(())
+}
+
+/// Set (or clear, with None) a principal's avatar. The value is an emoji grapheme
+/// or `"photo:<millis>"`; clearing restores the client-side default.
+pub async fn set_avatar(
+    db: &SqlitePool,
+    principal_id: &str,
+    avatar: Option<&str>,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE principals SET avatar = ?1 WHERE id = ?2")
+        .bind(avatar)
+        .bind(principal_id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// The current avatar value for a principal (None if unset / unknown).
+pub async fn get_avatar(reads: &SqlitePool, principal_id: &str) -> sqlx::Result<Option<String>> {
+    sqlx::query_scalar("SELECT avatar FROM principals WHERE id = ?1")
+        .bind(principal_id)
+        .fetch_optional(reads)
+        .await
+        .map(Option::flatten)
 }
 
 // ---- link tokens -----------------------------------------------------------
@@ -183,7 +210,7 @@ pub async fn rotate_token(db: &SqlitePool, principal_id: &str) -> sqlx::Result<S
 /// Resolve a link-token to its principal (if the token exists and isn't revoked).
 pub async fn resolve_token(reads: &SqlitePool, token: &str) -> sqlx::Result<Option<Principal>> {
     sqlx::query_as::<_, Principal>(
-        "SELECT p.id, p.kind, p.display_name, p.is_admin
+        "SELECT p.id, p.kind, p.display_name, p.is_admin, p.avatar
          FROM tokens t JOIN principals p ON p.id = t.principal_id
          WHERE t.token_hash = ?1 AND t.revoked_at IS NULL",
     )
@@ -274,7 +301,7 @@ pub async fn rotate_api_token(db: &SqlitePool, principal_id: &str) -> sqlx::Resu
 /// Resolve an API token to its (bot) principal, if active.
 pub async fn resolve_api_token(reads: &SqlitePool, token: &str) -> sqlx::Result<Option<Principal>> {
     sqlx::query_as::<_, Principal>(
-        "SELECT p.id, p.kind, p.display_name, p.is_admin
+        "SELECT p.id, p.kind, p.display_name, p.is_admin, p.avatar
          FROM api_tokens t JOIN principals p ON p.id = t.principal_id
          WHERE t.token_hash = ?1 AND t.revoked_at IS NULL",
     )
@@ -329,7 +356,7 @@ pub async fn create_session(db: &SqlitePool, principal_id: &str) -> sqlx::Result
 
 async fn lookup_session(reads: &SqlitePool, token: &str) -> sqlx::Result<Option<Principal>> {
     sqlx::query_as::<_, Principal>(
-        "SELECT p.id, p.kind, p.display_name, p.is_admin
+        "SELECT p.id, p.kind, p.display_name, p.is_admin, p.avatar
          FROM sessions s JOIN principals p ON p.id = s.principal_id
          WHERE s.token_hash = ?1 AND s.expires_at > ?2",
     )

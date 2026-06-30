@@ -26,6 +26,7 @@ export interface ChatMessage {
   room_id: string;
   author_id: string;
   author_name: string;
+  author_avatar?: string | null; // emoji / "photo:<millis>" / null → default
   body: string;
   reply_to: ReplyPreview | null;
   client_msg_id: string | null;

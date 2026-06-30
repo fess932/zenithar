@@ -3,10 +3,14 @@
   import { me } from "./session";
   import { t } from "./i18n";
   import VoicePlayer from "./VoicePlayer.svelte";
+  import Avatar from "./Avatar.svelte";
   import { openLightbox } from "./lightbox";
   import { openMessageMenu } from "./messageMenu";
 
   export let m: ChatMessage;
+  // First message of an author's run: only then do we print the name + add the
+  // group gap. Continuation lines tuck under it. Computed by the parent loop.
+  export let firstInGroup = true;
 
   $: mine = $me?.id === m.author_id;
 
@@ -70,6 +74,13 @@
   function fmtTime(ms: number): string {
     const d = new Date(ms);
     const p = (n: number) => String(n).padStart(2, "0");
+    return `${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  // Full precision (with seconds) for the hover tooltip — the old log view
+  // showed seconds inline; here they move to the title so the line stays clean.
+  function fullTime(ms: number): string {
+    const d = new Date(ms);
+    const p = (n: number) => String(n).padStart(2, "0");
     return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
   }
 
@@ -83,29 +94,27 @@
   const thumb = (id: string) => `/api/attachments/${id}/thumb`;
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<div
-  class="line arrived"
-  class:mine
-  class:flash={$highlightId === m.id}
-  data-mid={m.id}
-  onpointerdown={onPointerDown}
-  onpointermove={onPointerMove}
-  onpointerup={clearPress}
-  onpointercancel={clearPress}
-  onclick={onRowClick}
-  oncontextmenu={(e) => e.preventDefault()}
-  role="listitem"
->
-  <span class="time">{fmtTime(m.created_at)}</span>
-  <span class="who">{mine ? $t("you") : m.author_name}</span>
-  <div class="body">
+<!-- The message bubble itself; shared by the "mine" (right, no avatar) and the
+     "others" (left, avatar gutter) layouts below. -->
+{#snippet bubbleBlock()}
+  <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+  <div
+    class="bubble arrived"
+    class:mine
+    class:cont={!firstInGroup}
+    class:flash={$highlightId === m.id}
+    onpointerdown={onPointerDown}
+    onpointermove={onPointerMove}
+    onpointerup={clearPress}
+    onpointercancel={clearPress}
+    onclick={onRowClick}
+    oncontextmenu={(e) => e.preventDefault()}
+  >
     {#if m.reply_to}
       <button
         type="button"
         onclick={jumpToReply}
-        class="mb-1 flex w-full max-w-md flex-col items-start overflow-hidden rounded border-l-2 border-beacon bg-surface-2/60 px-2 py-1 text-left transition-colors hover:bg-surface-2"
+        class="mb-1 flex w-full flex-col items-start overflow-hidden rounded-md border-l-2 border-beacon bg-black/15 px-2 py-1 text-left transition-colors hover:bg-black/25"
       >
         <span class="max-w-full truncate font-mono text-[0.72rem] text-beacon"
           >{m.reply_to.author_name}</span
@@ -116,7 +125,7 @@
       </button>
     {/if}
 
-    {#if m.body}<span class="break-words">{m.body}</span>{/if}
+    {#if m.body}<span class="whitespace-pre-wrap break-words">{m.body}</span>{/if}
     {#if m.edited_at}<span
         class="ml-1 align-baseline text-[0.7rem] text-muted"
         title={$t("edited")}>({$t("edited")})</span
@@ -183,5 +192,46 @@
         {/each}
       </div>
     {/if}
+
+    <!-- Trailing time: the ghost reserves inline space on the last line so the
+         absolutely-pinned, visible time never overlaps the text. -->
+    <span class="timeghost" aria-hidden="true">{fmtTime(m.created_at)}</span>
+    <span class="time" title={fullTime(m.created_at)}>{fmtTime(m.created_at)}</span>
   </div>
-</div>
+{/snippet}
+
+{#if mine}
+  <!-- Your own line: right-aligned, no avatar (it's you). -->
+  <div
+    class="flex flex-col items-end px-2 sm:px-3"
+    class:mt-3={firstInGroup}
+    class:mt-[0.15rem]={!firstInGroup}
+    data-mid={m.id}
+    role="listitem"
+  >
+    {@render bubbleBlock()}
+  </div>
+{:else}
+  <!-- Someone else: avatar gutter on the left, name once atop the group. -->
+  <div
+    class="flex items-start gap-2 px-2 sm:px-3"
+    class:mt-3={firstInGroup}
+    class:mt-[0.15rem]={!firstInGroup}
+    data-mid={m.id}
+    role="listitem"
+  >
+    <div class="w-9 shrink-0">
+      {#if firstInGroup}
+        <Avatar id={m.author_id} name={m.author_name} avatar={m.author_avatar} size={36} />
+      {/if}
+    </div>
+    <div class="flex min-w-0 flex-col items-start">
+      {#if firstInGroup}
+        <span class="mb-0.5 ml-1 font-mono text-[0.72rem] font-medium text-beacon">
+          {m.author_name}
+        </span>
+      {/if}
+      {@render bubbleBlock()}
+    </div>
+  </div>
+{/if}

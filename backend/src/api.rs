@@ -250,6 +250,7 @@ async fn build_and_deliver(
         room_id: room_id.to_string(),
         author_id: author.id.clone(),
         author_name: author.display_name.clone(),
+        author_avatar: author.avatar.clone(),
         body: body.body,
         reply_to,
         client_msg_id: None,

@@ -506,6 +506,8 @@ pub struct Person {
     last_seen: Option<i64>,
     /// Last WS ping round-trip in ms (only while online).
     ping_ms: Option<i64>,
+    /// Emoji or `"photo:<millis>"`; `None` → client draws a default.
+    avatar: Option<String>,
 }
 
 /// `GET /api/people` — the connections list: every human principal with live
@@ -522,7 +524,7 @@ pub async fn people(State(state): State<AppState>, Identity(p): Identity) -> Res
     let pings = state.presence.ping_map();
     let people: Vec<Person> = roster
         .into_iter()
-        .map(|(id, name, kind)| {
+        .map(|(id, name, kind, avatar)| {
             let online = state.presence.is_online(&id);
             let last = last_seen.get(&id).copied();
             let ping_ms = if online {
@@ -534,6 +536,7 @@ pub async fn people(State(state): State<AppState>, Identity(p): Identity) -> Res
                 online,
                 last_seen: last,
                 ping_ms,
+                avatar,
                 id,
                 name,
                 kind,

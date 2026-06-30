@@ -3,6 +3,7 @@
   import { t } from "./i18n";
   import { online, joinRoom, loadRooms } from "./chat";
   import { me, listPeople, startDm, type Person } from "./session";
+  import Avatar from "./Avatar.svelte";
 
   export let onClose: () => void;
 
@@ -106,9 +107,16 @@
             ? 'cursor-pointer hover:bg-surface-2 disabled:opacity-60'
             : ''}"
         >
-          <span
-            class="size-2 shrink-0 rounded-full {isOnline(p) ? 'bg-emerald-400' : 'bg-muted/40'}"
-          ></span>
+          <span class="relative shrink-0">
+            <Avatar id={p.id} name={p.name} avatar={p.avatar} size={32} />
+            <span
+              class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-surface {isOnline(
+                p,
+              )
+                ? 'bg-emerald-400'
+                : 'bg-muted/50'}"
+            ></span>
+          </span>
           <span class="min-w-0 flex-1 truncate text-[0.9rem]">
             {p.name}{#if p.id === $me?.id}<span class="text-muted"> ({$t("you")})</span>{/if}
           </span>

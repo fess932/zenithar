@@ -11,6 +11,14 @@
   let showEmoji = false;
 
   let fileInput: HTMLInputElement;
+  let inputEl: HTMLInputElement;
+
+  // Keep the soft keyboard up after sending: tapping the send button (or its
+  // swap to the mic button when the field empties) blurs the input, which closes
+  // the keyboard on Android. Re-focusing inside the submit gesture holds it open.
+  function keepFocus(): void {
+    inputEl?.focus();
+  }
 
   // voice recording
   let recording = false;
@@ -62,6 +70,7 @@
       editing.set(null);
       body = "";
       showEmoji = false;
+      keepFocus();
       return;
     }
     if (!canSend) return;
@@ -76,6 +85,7 @@
       pending = [];
       showEmoji = false;
       replyingTo.set(null);
+      keepFocus();
     }
   }
 
@@ -389,6 +399,7 @@
       </button>
 
       <input
+        bind:this={inputEl}
         bind:value={body}
         onpaste={onPaste}
         placeholder={uploading ? $t("uploading") : $t("messagePlaceholder")}

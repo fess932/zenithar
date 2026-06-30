@@ -6,6 +6,8 @@ export interface Principal {
   kind: "user" | "client";
   display_name: string;
   is_admin: boolean;
+  // Emoji, "photo:<millis>", or null → the client renders a default (see Avatar).
+  avatar?: string | null;
 }
 
 export interface PrincipalSummary {
@@ -84,6 +86,38 @@ export async function renameMe(display_name: string): Promise<boolean> {
   });
   if (r.ok) me.update((m) => (m ? { ...m, display_name } : m));
   return r.ok;
+}
+
+/// Set an emoji avatar, or clear it (null → back to the default). The server
+/// echoes the stored value so we patch `me` without a refetch.
+export async function setAvatarEmoji(value: string | null): Promise<boolean> {
+  const r = await fetch("/api/me/avatar", {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({ value }),
+  });
+  if (r.ok) {
+    const { avatar } = (await r.json()) as { avatar: string | null };
+    me.update((m) => (m ? { ...m, avatar } : m));
+  }
+  return r.ok;
+}
+
+/// Upload a photo avatar (server crops it square). Returns success.
+export async function setAvatarPhoto(file: File): Promise<boolean> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const r = await fetch("/api/me/avatar/photo", { method: "POST", body: fd });
+  if (r.ok) {
+    const { avatar } = (await r.json()) as { avatar: string | null };
+    me.update((m) => (m ? { ...m, avatar } : m));
+  }
+  return r.ok;
+}
+
+/// Clear any custom avatar (emoji or photo) → revert to the default emoji.
+export async function resetAvatar(): Promise<boolean> {
+  return setAvatarEmoji(null);
 }
 
 export async function listPrincipals(): Promise<PrincipalSummary[]> {
@@ -193,6 +227,7 @@ export interface Person {
   online: boolean;
   last_seen: number | null; // unix millis of last activity
   ping_ms: number | null; // last WS round-trip (online only)
+  avatar?: string | null; // emoji / "photo:<millis>" / null → default
 }
 
 export async function listPeople(): Promise<Person[]> {

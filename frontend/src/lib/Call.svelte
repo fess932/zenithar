@@ -2,7 +2,6 @@
   import { fly } from "svelte/transition";
   import { backOut, bounceOut } from "svelte/easing";
   import { t } from "./i18n";
-  import { activeRoom } from "./chat";
   import {
     callState,
     callElapsed,
@@ -16,7 +15,6 @@
     MIC_MAX,
     canRouteAudio,
     incoming,
-    startCall,
     acceptCall,
     declineCall,
     hangup,
@@ -43,23 +41,9 @@
     return `${m}:${String(sec).padStart(2, "0")}`;
   }
 
-  function start(): void {
-    if ($activeRoom) startCall($activeRoom);
-  }
+  // The idle "start call" button now lives in the header (Header.svelte) so it
+  // never floats over the transcript; this component owns the active/ringing UI.
 </script>
-
-<!-- Idle: a floating call button (both roles), only with a room open. -->
-{#if $callState === "idle" && $activeRoom}
-  <button
-    type="button"
-    onclick={start}
-    aria-label={$t("call")}
-    title={$t("call")}
-    class="fixed bottom-24 right-4 z-30 grid size-12 cursor-pointer place-items-center rounded-full border border-line bg-surface-2 text-xl text-muted shadow-lg hover:border-beacon hover:text-beacon"
-  >
-    📞
-  </button>
-{/if}
 
 <!-- Active call bar (connecting / live). -->
 {#if $callState === "connecting" || $callState === "live"}
