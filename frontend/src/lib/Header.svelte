@@ -4,6 +4,7 @@
   import { status, activeRoom } from "./chat";
   import { callState, startCall } from "./call";
   import { me, renameMe, logout, openInApp } from "./session";
+  import { isApp } from "./platform";
   import Connections from "./Connections.svelte";
   import Avatar from "./Avatar.svelte";
   import AvatarEditor from "./AvatarEditor.svelte";
@@ -231,16 +232,20 @@
         {/each}
       </div>
 
-      <button
-        type="button"
-        onclick={() => {
-          menuOpen = false;
-          openInApp();
-        }}
-        class="cursor-pointer rounded-md py-2 font-mono text-[0.74rem] uppercase tracking-[0.08em] text-muted hover:text-text"
-      >
-        {$t("openInApp")}
-      </button>
+      <!-- "Open in app" hands off to the desktop/mobile app — pointless (and
+           hidden) when we're already running inside it. Web-only. -->
+      {#if !isApp}
+        <button
+          type="button"
+          onclick={() => {
+            menuOpen = false;
+            openInApp();
+          }}
+          class="cursor-pointer rounded-md py-2 font-mono text-[0.74rem] uppercase tracking-[0.08em] text-muted hover:text-text"
+        >
+          {$t("openInApp")}
+        </button>
+      {/if}
       <button
         type="button"
         onclick={() => {
