@@ -3,7 +3,19 @@
   import { fade, fly, scale } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import { lightbox, closeLightbox, step } from "./lightbox";
+  import { saveFromMessage } from "./saved";
   import { t } from "./i18n";
+
+  // Save the shown image/video into your private collection ("сохранёнки").
+  let saving = false;
+  let savedOk = false;
+  async function save(): Promise<void> {
+    if (!current || saving) return;
+    saving = true;
+    savedOk = await saveFromMessage(current.id);
+    saving = false;
+    if (savedOk) setTimeout(() => (savedOk = false), 1500);
+  }
 
   // Fit-to-screen by default; tap the image to view it at full size and scroll.
   let zoomed = false;
@@ -79,6 +91,18 @@
           {state.index + 1} / {state.items.length}
         </span>
       {/if}
+      <button
+        type="button"
+        onclick={save}
+        disabled={saving}
+        aria-label={$t("saveImage")}
+        title={$t("saveImage")}
+        class="grid size-9 shrink-0 cursor-pointer place-items-center rounded-md border text-lg disabled:opacity-50 {savedOk
+          ? 'border-emerald-400/60 text-emerald-400'
+          : 'border-white/20 text-white/80 hover:border-white/60 hover:text-white'}"
+      >
+        {savedOk ? "✓" : "🔖"}
+      </button>
       <a
         href={current.src}
         download={current.filename}

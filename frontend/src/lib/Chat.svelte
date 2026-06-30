@@ -9,6 +9,8 @@
   import Lightbox from "./Lightbox.svelte";
   import MessageMenu from "./MessageMenu.svelte";
   import ChatList from "./ChatList.svelte";
+  import Profile from "./Profile.svelte";
+  import { profileTarget, closeProfile } from "./profile";
   import { closeMessageMenu } from "./messageMenu";
   import { initCallSignaling } from "./call";
   import {
@@ -138,6 +140,17 @@
   $: current = $rooms.find((r) => r.id === $activeRoom) ?? null;
   $: currentTitle = current ? roomLabel(current) : $t("room");
 
+  // In a DM, the peer (other member) → a tappable avatar in the header. The avatar
+  // value comes from their messages (resolved live), default emoji until then.
+  $: peerId = current?.kind === "direct" ? (current.client_id ?? null) : null;
+  $: peer = peerId
+    ? {
+        id: peerId,
+        name: current?.title ?? "?",
+        avatar: $messages.find((m) => m.author_id === peerId)?.author_avatar ?? null,
+      }
+    : null;
+
   // Presence helpers.
   $: onlineEmployees = Object.values($online).filter((k) => k === "user").length;
   const isClientOnline = (r: RoomSummary): boolean => !!(r.client_id && $online[r.client_id]);
@@ -183,6 +196,7 @@
         roomOnline={currentRoomOnline}
         mode={mobile && isEmployee ? "room" : "drawer"}
         onBack={mobileBack}
+        {peer}
       />
 
     <main
@@ -257,6 +271,11 @@
 
   <!-- Long-press / click context menu for a message (reply, …) -->
   <MessageMenu />
+
+  <!-- Profile viewer (avatar + saved items) -->
+  {#if $profileTarget}
+    <Profile target={$profileTarget} onClose={closeProfile} />
+  {/if}
 
   <!-- Notification toasts: new client messages, plus quiet reaction nudges -->
   {#if $toasts.length > 0 || $reactionToasts.length > 0}

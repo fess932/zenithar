@@ -187,7 +187,7 @@ pub async fn upload_saved(
         public: false,
         created_at: now_millis(),
     };
-    match db::insert_saved(&state.db, &item, &p.id).await {
+    match db::insert_saved(&state.db, &item, &p.id, None).await {
         Ok(()) => Json(item).into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }

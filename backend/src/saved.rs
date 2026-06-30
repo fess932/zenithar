@@ -58,6 +58,10 @@ pub async fn save_from(
     {
         return StatusCode::FORBIDDEN.into_response();
     }
+    // Dedup: already saved this exact attachment? Return the existing copy.
+    if let Ok(Some(existing)) = db::find_saved_by_source(&state.reads, &p.id, &att_id).await {
+        return Json(existing).into_response();
+    }
     let new_id = Ulid::new().to_string();
     if copy_blob(&state, &att_id, &new_id, src.has_thumb).await.is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -73,7 +77,7 @@ pub async fn save_from(
         public: false,
         created_at: now_millis(),
     };
-    match db::insert_saved(&state.db, &item, &p.id).await {
+    match db::insert_saved(&state.db, &item, &p.id, Some(&att_id)).await {
         Ok(()) => Json(item).into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }

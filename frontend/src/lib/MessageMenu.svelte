@@ -22,11 +22,11 @@
   $: mine = !!m && $me?.id === m.message.author_id;
   $: canEdit = mine && !!m?.message.body.trim(); // only text messages
   $: canDelete = mine || ($me?.is_admin ?? false);
-  // Images in the message can be saved to your private collection ("сохранёнки").
-  $: savableImages = (m?.message.attachments ?? []).filter((a) =>
-    a.content_type.startsWith("image/"),
+  // Images or videos in the message can be saved to your collection ("сохранёнки").
+  $: savable = (m?.message.attachments ?? []).filter(
+    (a) => a.content_type.startsWith("image/") || a.content_type.startsWith("video/"),
   );
-  $: canSave = savableImages.length > 0;
+  $: canSave = savable.length > 0;
   // Visible item count drives the height (keeps the menu fully on-screen).
   $: items = 1 + (canCopy ? 1 : 0) + (canSave ? 1 : 0) + (canEdit ? 1 : 0) + (canDelete ? 1 : 0);
   $: menuH = items * ITEM_H + REACT_H + 8;
@@ -56,9 +56,9 @@
   }
 
   function save(): void {
-    const imgs = savableImages;
+    const items = savable;
     closeMessageMenu();
-    for (const a of imgs) void saveFromMessage(a.id);
+    for (const a of items) void saveFromMessage(a.id);
   }
 
   async function copy(): Promise<void> {

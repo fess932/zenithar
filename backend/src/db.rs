@@ -402,11 +402,17 @@ const SAVED_COLS: &str =
     "id, filename, content_type, size, width, height, has_thumb, public, created_at";
 
 /// Insert a saved item for a principal (its blob is already in Storage under `id`).
-pub async fn insert_saved(write: &SqlitePool, item: &SavedItem, principal_id: &str) -> sqlx::Result<()> {
+/// `source_id` is the message attachment it was copied from (for dedup), or None.
+pub async fn insert_saved(
+    write: &SqlitePool,
+    item: &SavedItem,
+    principal_id: &str,
+    source_id: Option<&str>,
+) -> sqlx::Result<()> {
     sqlx::query(
         "INSERT INTO saved_items
-           (id, principal_id, filename, content_type, size, width, height, has_thumb, public, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+           (id, principal_id, filename, content_type, size, width, height, has_thumb, public, created_at, source_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
     )
     .bind(&item.id)
     .bind(principal_id)
@@ -418,9 +424,26 @@ pub async fn insert_saved(write: &SqlitePool, item: &SavedItem, principal_id: &s
     .bind(item.has_thumb)
     .bind(item.public)
     .bind(item.created_at)
+    .bind(source_id)
     .execute(write)
     .await?;
     Ok(())
+}
+
+/// An already-saved item copied from `source_id` (dedup: re-saving the same chat
+/// attachment returns this instead of making another copy). None if not saved yet.
+pub async fn find_saved_by_source(
+    reads: &SqlitePool,
+    principal_id: &str,
+    source_id: &str,
+) -> sqlx::Result<Option<SavedItem>> {
+    sqlx::query_as::<_, SavedItem>(sqlx::AssertSqlSafe(format!(
+        "SELECT {SAVED_COLS} FROM saved_items WHERE principal_id = ?1 AND source_id = ?2 LIMIT 1"
+    )))
+    .bind(principal_id)
+    .bind(source_id)
+    .fetch_optional(reads)
+    .await
 }
 
 /// A principal's own saved items, newest first.

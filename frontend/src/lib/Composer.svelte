@@ -437,14 +437,26 @@
               <button
                 type="button"
                 onclick={() => pickSaved(it.id)}
-                class="aspect-square cursor-pointer overflow-hidden rounded border border-line hover:border-beacon"
+                class="relative aspect-square cursor-pointer overflow-hidden rounded border border-line hover:border-beacon"
               >
-                <img
-                  src={it.has_thumb ? savedThumb(it.id) : savedUrl(it.id)}
-                  alt={it.filename}
-                  loading="lazy"
-                  class="size-full object-cover"
-                />
+                {#if it.content_type.startsWith("video/")}
+                  <!-- svelte-ignore a11y_media_has_caption -->
+                  <video
+                    src={`${savedUrl(it.id)}#t=0.1`}
+                    muted
+                    playsinline
+                    preload="metadata"
+                    class="size-full object-cover"
+                  ></video>
+                  <span class="pointer-events-none absolute inset-0 grid place-items-center text-white/90">▶</span>
+                {:else}
+                  <img
+                    src={it.has_thumb ? savedThumb(it.id) : savedUrl(it.id)}
+                    alt={it.filename}
+                    loading="lazy"
+                    class="size-full object-cover"
+                  />
+                {/if}
               </button>
             {/each}
           </div>

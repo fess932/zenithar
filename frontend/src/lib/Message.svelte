@@ -8,6 +8,7 @@
   import { sticker } from "./stickers";
   import { openLightbox } from "./lightbox";
   import { openMessageMenu } from "./messageMenu";
+  import { openProfile } from "./profile";
 
   export let m: ChatMessage;
 
@@ -246,7 +247,15 @@
   >
     <div class="w-9 shrink-0">
       {#if firstInGroup}
-        <Avatar id={m.author_id} name={m.author_name} avatar={m.author_avatar} size={36} />
+        <button
+          type="button"
+          onclick={() =>
+            openProfile({ id: m.author_id, name: m.author_name, avatar: m.author_avatar ?? null })}
+          aria-label={m.author_name}
+          class="cursor-pointer rounded-full hover:opacity-80"
+        >
+          <Avatar id={m.author_id} name={m.author_name} avatar={m.author_avatar} size={36} />
+        </button>
       {/if}
     </div>
     <div class="flex min-w-0 flex-col items-start">

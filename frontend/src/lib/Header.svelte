@@ -4,6 +4,7 @@
   import { status, activeRoom } from "./chat";
   import { callState, startCall } from "./call";
   import { me, renameMe, logout, openInApp } from "./session";
+  import { openProfile } from "./profile";
   import { isApp } from "./platform";
   import Connections from "./Connections.svelte";
   import Avatar from "./Avatar.svelte";
@@ -22,6 +23,8 @@
   //   room   — mobile open conversation: ‹ back + room title.
   export let mode: "drawer" | "list" | "room" = "drawer";
   export let onBack: () => void = () => {};
+  // In a DM, the peer to show as a tappable avatar (→ their profile). null otherwise.
+  export let peer: { id: string; name: string; avatar: string | null } | null = null;
 
   const statusKey = {
     connecting: "connecting",
@@ -90,6 +93,16 @@
     >
       <span class="text-2xl leading-none">‹</span>
     </button>
+    {#if peer}
+      <button
+        type="button"
+        onclick={() => peer && openProfile(peer)}
+        aria-label={peer.name}
+        class="shrink-0 cursor-pointer rounded-full hover:opacity-80"
+      >
+        <Avatar id={peer.id} name={peer.name} avatar={peer.avatar} size={30} />
+      </button>
+    {/if}
     <span class="truncate font-mono text-[0.9rem] text-text">{roomTitle}</span>
     {#if roomOnline !== null}
       <span
@@ -121,6 +134,17 @@
         ></span>
       {/if}
     </button>
+    {#if peer}
+      <!-- DM peer avatar, right next to the name → tap for their profile. -->
+      <button
+        type="button"
+        onclick={() => peer && openProfile(peer)}
+        aria-label={peer.name}
+        class="shrink-0 cursor-pointer rounded-full hover:opacity-80"
+      >
+        <Avatar id={peer.id} name={peer.name} avatar={peer.avatar} size={30} />
+      </button>
+    {/if}
   {:else}
     <span class="truncate font-mono text-[0.9rem] text-text">{roomTitle}</span>
   {/if}
@@ -228,6 +252,17 @@
           {/if}
         </div>
       </div>
+
+      <button
+        type="button"
+        onclick={() => {
+          menuOpen = false;
+          if ($me) openProfile({ id: $me.id, name: $me.display_name, avatar: $me.avatar ?? null });
+        }}
+        class="cursor-pointer rounded-md px-1 py-2 text-left font-mono text-[0.78rem] uppercase tracking-[0.08em] text-muted hover:text-text"
+      >
+        {$t("myProfile")}
+      </button>
 
       {#if $me?.is_admin}
         <button
