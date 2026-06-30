@@ -10,6 +10,8 @@ pub trait Storage: Send + Sync {
     fn put(&self, key: &str, bytes: &[u8]) -> io::Result<()>;
     /// Read bytes for `key`, or `None` if absent.
     fn get(&self, key: &str) -> io::Result<Option<Vec<u8>>>;
+    /// Delete `key` if present (a missing key is not an error).
+    fn remove(&self, key: &str) -> io::Result<()>;
 }
 
 /// Files under a single directory. The key is the file name; we reject anything
@@ -49,6 +51,15 @@ impl Storage for DiskStorage {
         match std::fs::read(&path) {
             Ok(b) => Ok(Some(b)),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn remove(&self, key: &str) -> io::Result<()> {
+        let path = self.path_for(key)?;
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e),
         }
     }

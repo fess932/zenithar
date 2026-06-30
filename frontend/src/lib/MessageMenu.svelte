@@ -2,6 +2,7 @@
   import { scale } from "svelte/transition";
   import { messageMenu, closeMessageMenu } from "./messageMenu";
   import { replyingTo, editing, deleteMessage, toggleReaction } from "./chat";
+  import { saveFromMessage } from "./saved";
   import { me } from "./session";
   import { t } from "./i18n";
 
@@ -21,8 +22,13 @@
   $: mine = !!m && $me?.id === m.message.author_id;
   $: canEdit = mine && !!m?.message.body.trim(); // only text messages
   $: canDelete = mine || ($me?.is_admin ?? false);
+  // Images in the message can be saved to your private collection ("сохранёнки").
+  $: savableImages = (m?.message.attachments ?? []).filter((a) =>
+    a.content_type.startsWith("image/"),
+  );
+  $: canSave = savableImages.length > 0;
   // Visible item count drives the height (keeps the menu fully on-screen).
-  $: items = 1 + (canCopy ? 1 : 0) + (canEdit ? 1 : 0) + (canDelete ? 1 : 0);
+  $: items = 1 + (canCopy ? 1 : 0) + (canSave ? 1 : 0) + (canEdit ? 1 : 0) + (canDelete ? 1 : 0);
   $: menuH = items * ITEM_H + REACT_H + 8;
   $: left = m ? Math.max(8, Math.min(m.x, window.innerWidth - MENU_W - 8)) : 0;
   $: top = m ? Math.max(8, Math.min(m.y, window.innerHeight - menuH - 8)) : 0;
@@ -47,6 +53,12 @@
     const id = m?.message.id;
     closeMessageMenu();
     if (id && window.confirm($t("deleteConfirm"))) deleteMessage(id);
+  }
+
+  function save(): void {
+    const imgs = savableImages;
+    closeMessageMenu();
+    for (const a of imgs) void saveFromMessage(a.id);
   }
 
   async function copy(): Promise<void> {
@@ -114,6 +126,17 @@
       >
         <span class="text-base leading-none">⧉</span>
         {$t("copy")}
+      </button>
+    {/if}
+    {#if canSave}
+      <button
+        type="button"
+        role="menuitem"
+        onclick={save}
+        class="{itemBase} border-t border-line text-text"
+      >
+        <span class="text-base leading-none">🔖</span>
+        {$t("saveImage")}
       </button>
     {/if}
     {#if canEdit}

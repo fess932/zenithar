@@ -258,6 +258,7 @@ async fn build_and_deliver(
         edited_at: None,
         attachments,
         reactions: Vec::new(),
+        sticker: None,
     };
 
     crate::send::deliver(state, chat.clone(), notify_employees)

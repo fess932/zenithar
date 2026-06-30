@@ -1,8 +1,11 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { t } from "./i18n";
-  import { send, uploadFile, notify, replyingTo, editing, editMessage, MAX_UPLOAD_BYTES, type Attachment } from "./chat";
+  import { send, sendSticker, uploadFile, notify, replyingTo, editing, editMessage, MAX_UPLOAD_BYTES, type Attachment } from "./chat";
   import { EMOJI } from "./emoji";
+  import Sticker from "./Sticker.svelte";
+  import { STICKERS } from "./stickers";
+  import { listSaved, sendSaved, uploadSaved, savedThumb, savedUrl, type SavedItem } from "./saved";
 
   const MAX_ATTACH = 5;
 
@@ -10,8 +13,34 @@
   let pending: Attachment[] = [];
   let uploading = false;
   let showEmoji = false;
-  // Picker tabs. Stickers/GIFs are placeholders for now — UI is ready, content TBD.
-  let pickerTab: "emoji" | "stickers" | "gifs" = "emoji";
+  // Picker tabs. GIFs is a placeholder for now — UI is ready, content TBD.
+  let pickerTab: "emoji" | "stickers" | "gifs" | "saved" = "emoji";
+
+  // Saved items ("сохранёнки"), loaded lazily when the tab is first opened.
+  let savedItems: SavedItem[] | null = null;
+  let loadingSaved = false;
+  let savedFileInput: HTMLInputElement;
+
+  async function loadSaved(): Promise<void> {
+    loadingSaved = true;
+    savedItems = await listSaved();
+    loadingSaved = false;
+  }
+  $: if (showEmoji && pickerTab === "saved" && savedItems === null && !loadingSaved) void loadSaved();
+
+  function pickSaved(id: string): void {
+    void sendSaved(id);
+    showEmoji = false;
+  }
+  async function onSavedPicked(e: Event): Promise<void> {
+    const input = e.target as HTMLInputElement;
+    const files = Array.from(input.files ?? []);
+    input.value = "";
+    for (const file of files) {
+      const it = await uploadSaved(file);
+      if (it) savedItems = [it, ...(savedItems ?? [])];
+    }
+  }
 
   let fileInput: HTMLInputElement;
   let inputEl: HTMLInputElement;
@@ -94,6 +123,10 @@
 
   function addEmoji(em: string): void {
     body += em;
+  }
+
+  function pickSticker(id: string): void {
+    if (sendSticker(id)) showEmoji = false;
   }
 
   async function onFilePicked(e: Event): Promise<void> {
@@ -350,7 +383,7 @@
     <div class="mb-2 overflow-hidden rounded-md border border-line bg-surface-2">
       <!-- tabs -->
       <div class="flex border-b border-line">
-        {#each [{ id: "emoji", label: $t("emoji") }, { id: "stickers", label: $t("stickers") }, { id: "gifs", label: $t("gifs") }] as tab}
+        {#each [{ id: "emoji", label: $t("emoji") }, { id: "stickers", label: $t("stickers") }, { id: "gifs", label: $t("gifs") }, { id: "saved", label: $t("saved") }] as tab}
           <button
             type="button"
             onclick={() => (pickerTab = tab.id as typeof pickerTab)}
@@ -375,6 +408,49 @@
               </button>
             {/each}
           </div>
+        {:else if pickerTab === "stickers"}
+          <div class="grid grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-1">
+            {#each STICKERS as s (s.id)}
+              <button
+                type="button"
+                onclick={() => pickSticker(s.id)}
+                aria-label={s.emoji}
+                class="grid aspect-square cursor-pointer place-items-center rounded p-1 hover:bg-surface"
+              >
+                <Sticker def={s} size={64} />
+              </button>
+            {/each}
+          </div>
+        {:else if pickerTab === "saved"}
+          <div class="grid grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-1">
+            <!-- Upload tile -->
+            <button
+              type="button"
+              onclick={() => savedFileInput.click()}
+              aria-label={$t("uploadSaved")}
+              title={$t("uploadSaved")}
+              class="grid aspect-square cursor-pointer place-items-center rounded border border-dashed border-line text-2xl text-muted hover:border-beacon hover:text-beacon"
+            >
+              +
+            </button>
+            {#each savedItems ?? [] as it (it.id)}
+              <button
+                type="button"
+                onclick={() => pickSaved(it.id)}
+                class="aspect-square cursor-pointer overflow-hidden rounded border border-line hover:border-beacon"
+              >
+                <img
+                  src={it.has_thumb ? savedThumb(it.id) : savedUrl(it.id)}
+                  alt={it.filename}
+                  loading="lazy"
+                  class="size-full object-cover"
+                />
+              </button>
+            {/each}
+          </div>
+          {#if savedItems !== null && savedItems.length === 0}
+            <p class="px-1 py-3 font-mono text-[0.74rem] leading-snug text-muted">{$t("noSaved")}</p>
+          {/if}
         {:else}
           <p class="grid place-items-center py-9 font-mono text-[0.78rem] text-muted">{$t("comingSoon")}</p>
         {/if}
@@ -462,6 +538,15 @@
       type="file"
       multiple
       onchange={onFilePicked}
+      class="hidden"
+      aria-hidden="true"
+    />
+    <input
+      bind:this={savedFileInput}
+      type="file"
+      accept="image/*"
+      multiple
+      onchange={onSavedPicked}
       class="hidden"
       aria-hidden="true"
     />

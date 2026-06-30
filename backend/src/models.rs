@@ -13,6 +13,23 @@ pub struct Attachment {
     pub has_thumb: bool,
 }
 
+/// A "сохранёнка" — one image in a user's private saved collection. Holds its own
+/// Storage blob (keyed by `id`), independent of any message. `public` exposes it
+/// on the owner's profile. Shares the Attachment shape so the UI renders it the
+/// same way.
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct SavedItem {
+    pub id: String,
+    pub filename: String,
+    pub content_type: String,
+    pub size: i64,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub has_thumb: bool,
+    pub public: bool,
+    pub created_at: i64,
+}
+
 /// A compact preview of the message a reply quotes (Telegram-style). Derived at
 /// read time from the parent row, so it always renders even if the original has
 /// scrolled out of the loaded window. `id` lets the client jump to the original.
@@ -54,6 +71,9 @@ pub struct ChatMessage {
     pub attachments: Vec<Attachment>,
     /// Emoji reactions, grouped per emoji. Empty for a brand-new message.
     pub reactions: Vec<Reaction>,
+    /// Sticker id when this is a sticker message (body is then empty); the client
+    /// renders the matching bundled animation. None for ordinary messages.
+    pub sticker: Option<String>,
 }
 
 /// A room the current principal may access. `title` is the client's display name
@@ -121,6 +141,9 @@ pub enum Inbound {
         /// Id of the message being replied to, if any.
         #[serde(default)]
         reply_to: Option<String>,
+        /// A sticker id (e.g. "heart"); the message is a sticker, body is empty.
+        #[serde(default)]
+        sticker: Option<String>,
     },
     /// Edit a message's body (author only).
     Edit { id: String, body: String },

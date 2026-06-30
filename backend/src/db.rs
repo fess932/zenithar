@@ -6,7 +6,7 @@ use sqlx::SqlitePool;
 
 use ulid::Ulid;
 
-use crate::models::{Attachment, ChatMessage, Reaction, ReplyPreview, RoomSummary};
+use crate::models::{Attachment, ChatMessage, Reaction, ReplyPreview, RoomSummary, SavedItem};
 
 /// The single-writer pool (max 1 connection). SQLite serialises writes, so we
 /// funnel all of them through one connection — that's what lets the writer task
@@ -64,6 +64,7 @@ struct MsgRow {
     // The author's current avatar, joined live from principals (None if unset).
     author_avatar: Option<String>,
     body: String,
+    sticker: Option<String>,
     client_msg_id: Option<String>,
     created_at: i64,
     edited_at: Option<i64>,
@@ -121,7 +122,7 @@ pub async fn messages_before(
 ) -> Result<Vec<ChatMessage>> {
     const COLS: &str =
         "SELECT m.id, m.room_id, m.author_id, m.author_name, ap.avatar AS author_avatar,
-                m.body, m.client_msg_id, m.created_at,
+                m.body, m.sticker, m.client_msg_id, m.created_at,
                 m.edited_at,
                 p.id AS reply_id, p.author_name AS reply_author, p.body AS reply_body,
                 EXISTS(SELECT 1 FROM attachments a WHERE a.message_id = p.id) AS reply_has_att
@@ -222,6 +223,7 @@ pub async fn messages_before(
                 author_name: r.author_name,
                 author_avatar: r.author_avatar,
                 body: r.body,
+                sticker: r.sticker,
                 reply_to,
                 client_msg_id: r.client_msg_id,
                 created_at: r.created_at,
@@ -394,6 +396,96 @@ struct AttRow {
     width: Option<i64>,
     height: Option<i64>,
     has_thumb: bool,
+}
+
+const SAVED_COLS: &str =
+    "id, filename, content_type, size, width, height, has_thumb, public, created_at";
+
+/// Insert a saved item for a principal (its blob is already in Storage under `id`).
+pub async fn insert_saved(write: &SqlitePool, item: &SavedItem, principal_id: &str) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO saved_items
+           (id, principal_id, filename, content_type, size, width, height, has_thumb, public, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+    )
+    .bind(&item.id)
+    .bind(principal_id)
+    .bind(&item.filename)
+    .bind(&item.content_type)
+    .bind(item.size)
+    .bind(item.width)
+    .bind(item.height)
+    .bind(item.has_thumb)
+    .bind(item.public)
+    .bind(item.created_at)
+    .execute(write)
+    .await?;
+    Ok(())
+}
+
+/// A principal's own saved items, newest first.
+pub async fn list_saved(reads: &SqlitePool, principal_id: &str) -> sqlx::Result<Vec<SavedItem>> {
+    sqlx::query_as::<_, SavedItem>(sqlx::AssertSqlSafe(format!(
+        "SELECT {SAVED_COLS} FROM saved_items WHERE principal_id = ?1 ORDER BY created_at DESC, id DESC"
+    )))
+    .bind(principal_id)
+    .fetch_all(reads)
+    .await
+}
+
+/// Another principal's PUBLIC saved items (for their profile), newest first.
+pub async fn list_saved_public(reads: &SqlitePool, principal_id: &str) -> sqlx::Result<Vec<SavedItem>> {
+    sqlx::query_as::<_, SavedItem>(sqlx::AssertSqlSafe(format!(
+        "SELECT {SAVED_COLS} FROM saved_items WHERE principal_id = ?1 AND public = 1 ORDER BY created_at DESC, id DESC"
+    )))
+    .bind(principal_id)
+    .fetch_all(reads)
+    .await
+}
+
+/// A saved item with its owner's id (for serve/op auth). None if it doesn't exist.
+pub async fn get_saved(reads: &SqlitePool, id: &str) -> sqlx::Result<Option<(String, SavedItem)>> {
+    let owner: Option<(String,)> = sqlx::query_as("SELECT principal_id FROM saved_items WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(reads)
+        .await?;
+    let Some((owner,)) = owner else {
+        return Ok(None);
+    };
+    let item = sqlx::query_as::<_, SavedItem>(sqlx::AssertSqlSafe(format!(
+        "SELECT {SAVED_COLS} FROM saved_items WHERE id = ?1"
+    )))
+    .bind(id)
+    .fetch_one(reads)
+    .await?;
+    Ok(Some((owner, item)))
+}
+
+/// Toggle an item's public flag (owner only). Returns whether a row changed.
+pub async fn set_saved_public(
+    write: &SqlitePool,
+    id: &str,
+    principal_id: &str,
+    public: bool,
+) -> sqlx::Result<bool> {
+    let r = sqlx::query("UPDATE saved_items SET public = ?3 WHERE id = ?1 AND principal_id = ?2")
+        .bind(id)
+        .bind(principal_id)
+        .bind(public)
+        .execute(write)
+        .await?;
+    Ok(r.rows_affected() > 0)
+}
+
+/// Delete a saved item (owner only). Returns whether a row was removed (the caller
+/// then drops the blob).
+pub async fn delete_saved(write: &SqlitePool, id: &str, principal_id: &str) -> sqlx::Result<bool> {
+    let r = sqlx::query("DELETE FROM saved_items WHERE id = ?1 AND principal_id = ?2")
+        .bind(id)
+        .bind(principal_id)
+        .execute(write)
+        .await?;
+    Ok(r.rows_affected() > 0)
 }
 
 /// Look up an attachment plus the room it belongs to (for access checks).

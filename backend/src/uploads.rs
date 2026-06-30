@@ -11,7 +11,7 @@ use sqlx::SqlitePool;
 use ulid::Ulid;
 
 use crate::auth::{Identity, Principal};
-use crate::models::Attachment;
+use crate::models::{Attachment, SavedItem};
 use crate::routes::origin_ok;
 use crate::state::AppState;
 use crate::storage::{thumb_key, Storage};
@@ -118,6 +118,79 @@ pub async fn ingest(state: &AppState, p: &Principal, mut multipart: Multipart) -
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
     Json(att).into_response()
+}
+
+/// `POST /api/saved/upload` — multipart `file`; store an image straight into the
+/// caller's saved collection (no room). Returns the [`SavedItem`].
+pub async fn upload_saved(
+    State(state): State<AppState>,
+    Identity(p): Identity,
+    headers: HeaderMap,
+    mut multipart: Multipart,
+) -> Response {
+    if !origin_ok(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    if !state.limits.uploads.check(&p.id) {
+        return (StatusCode::TOO_MANY_REQUESTS, "too many uploads").into_response();
+    }
+    let mut filename = String::from("file");
+    let mut declared_ct: Option<String> = None;
+    let mut bytes: Option<Vec<u8>> = None;
+    loop {
+        let field = match multipart.next_field().await {
+            Ok(Some(f)) => f,
+            Ok(None) => break,
+            Err(_) => return (StatusCode::BAD_REQUEST, "malformed upload").into_response(),
+        };
+        if field.name() == Some("file") {
+            if let Some(name) = field.file_name() {
+                filename = sanitize_filename(name);
+            }
+            declared_ct = field.content_type().map(str::to_string);
+            match field.bytes().await {
+                Ok(b) => bytes = Some(b.to_vec()),
+                Err(_) => return (StatusCode::PAYLOAD_TOO_LARGE, "file too large").into_response(),
+            }
+        }
+    }
+    let Some(bytes) = bytes else {
+        return (StatusCode::BAD_REQUEST, "file required").into_response();
+    };
+    if bytes.is_empty() {
+        return (StatusCode::BAD_REQUEST, "empty file").into_response();
+    }
+    if bytes.len() > MAX_UPLOAD_BYTES {
+        return (StatusCode::PAYLOAD_TOO_LARGE, "file too large").into_response();
+    }
+
+    let id = Ulid::new().to_string();
+    let size = bytes.len() as i64;
+    let storage = state.storage.clone();
+    let id_for_blocking = id.clone();
+    let processed = tokio::task::spawn_blocking(move || {
+        process_and_store(&*storage, &id_for_blocking, bytes, declared_ct)
+    })
+    .await;
+    let prepared = match processed {
+        Ok(Ok(p)) => p,
+        _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let item = SavedItem {
+        id,
+        filename,
+        content_type: prepared.content_type,
+        size,
+        width: prepared.width,
+        height: prepared.height,
+        has_thumb: prepared.has_thumb,
+        public: false,
+        created_at: now_millis(),
+    };
+    match db::insert_saved(&state.db, &item, &p.id).await {
+        Ok(()) => Json(item).into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
 }
 
 struct Prepared {

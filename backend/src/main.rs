@@ -5,7 +5,7 @@ use anyhow::Result;
 use axum::extract::DefaultBodyLimit;
 use axum::http::{header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get, post};
+use axum::routing::{any, get, patch, post};
 use axum::Router;
 use tokio::sync::broadcast;
 use tower_http::trace::TraceLayer;
@@ -24,6 +24,7 @@ mod push;
 mod ratelimit;
 mod recordings;
 mod routes;
+mod saved;
 mod send;
 mod state;
 mod storage;
@@ -353,6 +354,18 @@ async fn main() -> Result<()> {
         )
         .route("/api/attachments/{id}", get(uploads::serve))
         .route("/api/attachments/{id}/thumb", get(uploads::serve_thumb))
+        // Saved items ("сохранёнки") — a user's private/public saved images.
+        .route("/api/saved", get(saved::list))
+        .route("/api/saved/of/{principal_id}", get(saved::list_of))
+        .route(
+            "/api/saved/upload",
+            post(uploads::upload_saved).layer(DefaultBodyLimit::max(uploads::MAX_UPLOAD_BYTES + 1024)),
+        )
+        .route("/api/saved/from/{attachment_id}", post(saved::save_from))
+        .route("/api/saved/{id}", patch(saved::set_public).delete(saved::delete))
+        .route("/api/saved/{id}/attach", post(saved::attach))
+        .route("/api/saved/{id}/file", get(saved::serve))
+        .route("/api/saved/{id}/thumb", get(saved::serve_thumb))
         .route("/api/auth/logout", post(routes::logout))
         .route(
             "/api/principals",

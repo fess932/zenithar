@@ -4,10 +4,15 @@
   import { t } from "./i18n";
   import VoicePlayer from "./VoicePlayer.svelte";
   import Avatar from "./Avatar.svelte";
+  import Sticker from "./Sticker.svelte";
+  import { sticker } from "./stickers";
   import { openLightbox } from "./lightbox";
   import { openMessageMenu } from "./messageMenu";
 
   export let m: ChatMessage;
+
+  // A sticker message renders the bundled animation instead of a text bubble.
+  $: stickerDef = m.sticker ? sticker(m.sticker) : undefined;
   // First message of an author's run: only then do we print the name + add the
   // group gap. Continuation lines tuck under it. Computed by the parent loop.
   export let firstInGroup = true;
@@ -184,6 +189,18 @@
   </div>
 {/snippet}
 
+<!-- Sticker message: the bundled animation, no bubble chrome, with a small time. -->
+{#snippet stickerBlock()}
+  {#if stickerDef}
+    <Sticker def={stickerDef} size={128} />
+  {:else}
+    <span class="text-5xl leading-none" title={m.sticker}>🖼️</span>
+  {/if}
+  <span class="mt-0.5 font-mono text-[0.6rem] text-muted" title={fullTime(m.created_at)}>
+    {fmtTime(m.created_at)}
+  </span>
+{/snippet}
+
 <!-- Reaction chips below the bubble; tap to toggle your own. -->
 {#snippet reactionChips()}
   {#if m.reactions.length > 0}
@@ -215,7 +232,7 @@
     data-mid={m.id}
     role="listitem"
   >
-    {@render bubbleBlock()}
+    {#if m.sticker}{@render stickerBlock()}{:else}{@render bubbleBlock()}{/if}
     {@render reactionChips()}
   </div>
 {:else}
@@ -238,7 +255,7 @@
           {m.author_name}
         </span>
       {/if}
-      {@render bubbleBlock()}
+      {#if m.sticker}{@render stickerBlock()}{:else}{@render bubbleBlock()}{/if}
       {@render reactionChips()}
     </div>
   </div>

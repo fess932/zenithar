@@ -174,11 +174,19 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                         }
                         let _ = db::mark_read(&state.db, &principal.id, &active_room, now).await;
                     }
-                    Inbound::Msg { body, client_msg_id, attachment_ids, reply_to } => {
+                    Inbound::Msg { body, client_msg_id, attachment_ids, reply_to, sticker } => {
                         if !msg_bucket.check() {
                             debug!("message rate-limited");
                             continue;
                         }
+                        // A sticker id is a short slug ([a-z0-9-_]); reject anything
+                        // off-shape so it can't be used to smuggle a path/url.
+                        let sticker = sticker.filter(|s| {
+                            !s.is_empty()
+                                && s.len() <= 64
+                                && s.bytes()
+                                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                        });
                         // Resolve up to 5 attachments, each must belong to this room.
                         let mut attachments = Vec::new();
                         let mut bad = false;
@@ -193,7 +201,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                             continue;
                         }
                         // Ignore empty messages that carry nothing.
-                        if body.trim().is_empty() && attachments.is_empty() {
+                        if body.trim().is_empty() && attachments.is_empty() && sticker.is_none() {
                             continue;
                         }
                         // Resolve the quoted message (must be in this room); a
@@ -217,6 +225,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                             edited_at: None,
                             attachments,
                             reactions: Vec::new(),
+                            sticker,
                         };
                         // Fan out + (for anonymous clients) ping employees + write.
                         if crate::send::deliver(&state, chat, !is_employee).await.is_err() {

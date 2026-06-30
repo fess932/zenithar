@@ -39,8 +39,32 @@ const copyStatic = () =>
     ASSETS.map((f) => Bun.write(`dist/assets/${f}`, Bun.file(`src/assets/${f}`))),
   );
 
+// Sticker assets (Lottie/WebM/WebP) → dist/assets/stickers/, verbatim.
+const copyStickers = async (): Promise<void> => {
+  const { readdirSync } = await import("node:fs");
+  await Promise.all(
+    readdirSync("src/assets/stickers").map((f) =>
+      Bun.write(`dist/assets/stickers/${f}`, Bun.file(`src/assets/stickers/${f}`)),
+    ),
+  );
+};
+
+// The dotLottie (ThorVG) WASM, self-hosted — Sticker.svelte's setWasmUrl points here.
+const copyWasm = () =>
+  Bun.write(
+    "dist/assets/dotlottie-player.wasm",
+    Bun.file("node_modules/@lottiefiles/dotlottie-web/dist/dotlottie-player.wasm"),
+  );
+
 async function buildAll(): Promise<void> {
-  await Promise.all([buildJs(), buildCss(), copyHtml(), copyStatic()]);
+  await Promise.all([
+    buildJs(),
+    buildCss(),
+    copyHtml(),
+    copyStatic(),
+    copyStickers(),
+    copyWasm(),
+  ]);
   console.log(`built ${new Date().toLocaleTimeString()}`);
 }
 

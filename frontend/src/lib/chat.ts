@@ -41,6 +41,7 @@ export interface ChatMessage {
   edited_at: number | null; // set when the author edits the body
   attachments: Attachment[];
   reactions: Reaction[];
+  sticker: string | null; // sticker id when this is a sticker message (body empty)
 }
 
 export interface RoomSummary {
@@ -345,6 +346,7 @@ interface OutMsg {
   attachment_ids: string[];
   reply_to: string | null;
   client_msg_id: string;
+  sticker?: string; // set only for sticker messages
 }
 let pending: OutMsg[] = [];
 const MAX_PENDING = 50;
@@ -389,6 +391,25 @@ export function send(
     client_msg_id: uuid(),
   };
   // If the socket is down, queue and let onopen flush it (instead of failing).
+  if (!transmit(m)) {
+    if (pending.length >= MAX_PENDING) {
+      flash(get(t)("errSend"));
+      return false;
+    }
+    pending.push(m);
+  }
+  return true;
+}
+
+/// Send a sticker (by bundled id) as its own message — a reference, not bytes.
+export function sendSticker(id: string): boolean {
+  const m: OutMsg = {
+    body: "",
+    attachment_ids: [],
+    reply_to: null,
+    client_msg_id: uuid(),
+    sticker: id,
+  };
   if (!transmit(m)) {
     if (pending.length >= MAX_PENDING) {
       flash(get(t)("errSend"));

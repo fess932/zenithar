@@ -22,7 +22,7 @@ pub async fn deliver(
         let _ = state.notify.send(ClientNotice {
             room_id: chat.room_id.clone(),
             from_name: chat.author_name.clone(),
-            preview: notice_preview(&chat.body, !chat.attachments.is_empty()),
+            preview: chat_preview(&chat),
             created_at: chat.created_at,
         });
     }
@@ -79,7 +79,7 @@ async fn push_offline(state: &AppState, chat: &ChatMessage) {
     } else {
         chat.author_name.clone()
     };
-    let body = notice_preview(&chat.body, !chat.attachments.is_empty());
+    let body = chat_preview(chat);
 
     for (token, _pid) in tokens {
         match fcm.send(&token, &title, &body, &chat.room_id).await {
@@ -124,6 +124,15 @@ pub async fn push_reaction(
             Err(e) => tracing::warn!(error = %e, "react push: FCM send failed"),
         }
     }
+}
+
+/// Notification preview for a whole message: "Стикер" for a sticker, else the
+/// body (or an attachment marker).
+fn chat_preview(chat: &ChatMessage) -> String {
+    if chat.sticker.is_some() {
+        return "Стикер".to_string();
+    }
+    notice_preview(&chat.body, !chat.attachments.is_empty())
 }
 
 /// A short, single-line preview for a notification: the trimmed body (capped),
