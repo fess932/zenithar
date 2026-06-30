@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { type ChatMessage, highlightId, flashMessage } from "./chat";
+  import { type ChatMessage, highlightId, flashMessage, toggleReaction } from "./chat";
   import { me } from "./session";
   import { t } from "./i18n";
   import VoicePlayer from "./VoicePlayer.svelte";
@@ -55,10 +55,13 @@
     return target instanceof Element && target.closest("button, a") !== null;
   }
 
-  function onRowClick(e: MouseEvent): void {
-    if (lastType !== "mouse") return; // touch is handled by long-press
-    if (isInteractive(e.target)) return; // let the child (image/quote/link) act
-    openMessageMenu(m, e.clientX, e.clientY);
+  // Desktop opens the menu on RIGHT-click (like Telegram); left-click does
+  // nothing. Touch uses long-press (above). Right-clicking an image/link/quote is
+  // left to the browser so "save image" etc. still work.
+  function onContextMenu(e: MouseEvent): void {
+    if (isInteractive(e.target)) return; // leave the native menu on media/links
+    e.preventDefault(); // suppress the native menu on the bubble body
+    if (lastType === "mouse") openMessageMenu(m, e.clientX, e.clientY);
   }
 
   // Jump to the quoted original (if still in the loaded window) and flash it.
@@ -107,8 +110,7 @@
     onpointermove={onPointerMove}
     onpointerup={clearPress}
     onpointercancel={clearPress}
-    onclick={onRowClick}
-    oncontextmenu={(e) => e.preventDefault()}
+    oncontextmenu={onContextMenu}
   >
     {#if m.reply_to}
       <button
@@ -200,6 +202,28 @@
   </div>
 {/snippet}
 
+<!-- Reaction chips below the bubble; tap to toggle your own. -->
+{#snippet reactionChips()}
+  {#if m.reactions.length > 0}
+    <div class="mt-1 flex flex-wrap gap-1" class:justify-end={mine}>
+      {#each m.reactions as r (r.emoji)}
+        {@const mineR = !!$me && r.by.includes($me.id)}
+        <button
+          type="button"
+          onclick={() => toggleReaction(m.id, r.emoji)}
+          aria-pressed={mineR}
+          class="flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[0.8rem] leading-none transition-colors {mineR
+            ? 'border-beacon bg-beacon/15 text-beacon'
+            : 'border-line bg-surface-2 text-muted hover:border-beacon/60'}"
+        >
+          <span>{r.emoji}</span>
+          <span class="font-mono text-[0.7rem]">{r.by.length}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
+{/snippet}
+
 {#if mine}
   <!-- Your own line: right-aligned, no avatar (it's you). -->
   <div
@@ -210,6 +234,7 @@
     role="listitem"
   >
     {@render bubbleBlock()}
+    {@render reactionChips()}
   </div>
 {:else}
   <!-- Someone else: avatar gutter on the left, name once atop the group. -->
@@ -232,6 +257,7 @@
         </span>
       {/if}
       {@render bubbleBlock()}
+      {@render reactionChips()}
     </div>
   </div>
 {/if}

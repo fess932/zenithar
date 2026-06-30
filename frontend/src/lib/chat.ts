@@ -21,6 +21,13 @@ export interface ReplyPreview {
   has_attachment: boolean;
 }
 
+// One emoji's reactions on a message: the principal ids who reacted. count =
+// by.length; it's "mine" when my id is in `by`.
+export interface Reaction {
+  emoji: string;
+  by: string[];
+}
+
 export interface ChatMessage {
   id: string;
   room_id: string;
@@ -33,6 +40,7 @@ export interface ChatMessage {
   created_at: number; // unix millis
   edited_at: number | null; // set when the author edits the body
   attachments: Attachment[];
+  reactions: Reaction[];
 }
 
 export interface RoomSummary {
@@ -74,6 +82,7 @@ type Frame =
   | { type: "unread"; room_id: string }
   | { type: "message-edited"; id: string; room_id: string; body: string; edited_at: number }
   | { type: "message-deleted"; id: string; room_id: string }
+  | { type: "message-reaction"; id: string; room_id: string; reactions: Reaction[] }
   | { type: "rooms-changed" }
   | { type: string; [k: string]: unknown };
 
@@ -164,6 +173,12 @@ export function editMessage(id: string, body: string): void {
 /// Delete a message (author or admin — server enforces).
 export function deleteMessage(id: string): void {
   sendFrame({ type: "delete", id });
+}
+
+/// Toggle an emoji reaction on a message (add if absent, remove if present). The
+/// server broadcasts the new set back as a `message-reaction` frame.
+export function toggleReaction(id: string, emoji: string): void {
+  sendFrame({ type: "react", id, emoji });
 }
 
 /// Unread anonymous-client messages per room (cleared when the room is opened).
@@ -260,6 +275,11 @@ export function connect(): void {
     } else if (f.type === "message-deleted") {
       const id = (f as { id: string }).id;
       messages.update((all) => all.filter((m) => m.id !== id));
+    } else if (f.type === "message-reaction") {
+      const e = f as { id: string; reactions: Reaction[] };
+      messages.update((all) =>
+        all.map((m) => (m.id === e.id ? { ...m, reactions: e.reactions ?? [] } : m)),
+      );
     } else if (f.type === "rooms-changed") {
       void loadRooms(); // e.g. someone opened a DM with us — refresh the list
     } else if (f.type === "client-notice") {

@@ -1,12 +1,20 @@
 <script lang="ts">
   import { scale } from "svelte/transition";
   import { messageMenu, closeMessageMenu } from "./messageMenu";
-  import { replyingTo, editing, deleteMessage } from "./chat";
+  import { replyingTo, editing, deleteMessage, toggleReaction } from "./chat";
   import { me } from "./session";
   import { t } from "./i18n";
 
   const MENU_W = 176; // w-44
   const ITEM_H = 44;
+  const REACT_H = 44; // the quick-reaction bar on top
+  // Quick reactions, Telegram-style. Tapping toggles your own.
+  const QUICK = ["👍", "❤️", "😂", "🔥", "🎉", "😮"];
+
+  function react(emoji: string): void {
+    if (m) toggleReaction(m.message.id, emoji);
+    closeMessageMenu();
+  }
 
   $: m = $messageMenu;
   $: canCopy = !!m?.message.body.trim();
@@ -15,7 +23,7 @@
   $: canDelete = mine || ($me?.is_admin ?? false);
   // Visible item count drives the height (keeps the menu fully on-screen).
   $: items = 1 + (canCopy ? 1 : 0) + (canEdit ? 1 : 0) + (canDelete ? 1 : 0);
-  $: menuH = items * ITEM_H + 8;
+  $: menuH = items * ITEM_H + REACT_H + 8;
   $: left = m ? Math.max(8, Math.min(m.x, window.innerWidth - MENU_W - 8)) : 0;
   $: top = m ? Math.max(8, Math.min(m.y, window.innerHeight - menuH - 8)) : 0;
 
@@ -80,6 +88,19 @@
     style="left:{left}px; top:{top}px;"
     class="fixed z-50 w-44 overflow-hidden rounded-lg border border-line bg-surface shadow-2xl"
   >
+    <!-- Quick reactions row -->
+    <div class="flex items-center justify-between border-b border-line px-1.5 py-1">
+      {#each QUICK as em}
+        <button
+          type="button"
+          onclick={() => react(em)}
+          aria-label={em}
+          class="grid size-7 cursor-pointer place-items-center rounded-full text-lg leading-none hover:bg-surface-2"
+        >
+          {em}
+        </button>
+      {/each}
+    </div>
     <button type="button" role="menuitem" onclick={reply} class="{itemBase} text-text">
       <span class="text-base leading-none">↩</span>
       {$t("reply")}

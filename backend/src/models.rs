@@ -24,8 +24,17 @@ pub struct ReplyPreview {
     pub has_attachment: bool,
 }
 
-/// A persisted / broadcast chat message. Attachments (0–5) are loaded separately
-/// and embedded, so this is not a direct `FromRow`.
+/// Reactions for one emoji on a message: the principal ids who reacted. The
+/// client derives the count (`by.len()`) and highlights it when its own id is in
+/// `by`. Grouped per emoji and embedded in [`ChatMessage`].
+#[derive(Clone, Debug, Serialize)]
+pub struct Reaction {
+    pub emoji: String,
+    pub by: Vec<String>,
+}
+
+/// A persisted / broadcast chat message. Attachments (0–5) and reactions are
+/// loaded separately and embedded, so this is not a direct `FromRow`.
 #[derive(Clone, Debug, Serialize)]
 pub struct ChatMessage {
     pub id: String, // ULID, app-generated so we can broadcast before the DB commit
@@ -43,6 +52,8 @@ pub struct ChatMessage {
     pub created_at: i64,        // unix millis
     pub edited_at: Option<i64>, // set when the author edits the body
     pub attachments: Vec<Attachment>,
+    /// Emoji reactions, grouped per emoji. Empty for a brand-new message.
+    pub reactions: Vec<Reaction>,
 }
 
 /// A room the current principal may access. `title` is the client's display name
@@ -115,6 +126,8 @@ pub enum Inbound {
     Edit { id: String, body: String },
     /// Delete a message (author, or any admin).
     Delete { id: String },
+    /// Toggle one emoji reaction on a message (anyone in the room).
+    React { id: String, emoji: String },
     /// Start (or join) the call in a room. The server replies with `call-offer`.
     CallStart { room_id: String },
     /// SDP answer to the server's offer (the server is always the offerer).
@@ -180,6 +193,12 @@ pub enum Outbound {
     },
     /// A message was deleted (viewers of that room remove it).
     MessageDeleted { id: String, room_id: String },
+    /// A message's reactions changed (live update for viewers of that room).
+    MessageReaction {
+        id: String,
+        room_id: String,
+        reactions: Vec<Reaction>,
+    },
     /// The caller's room list changed (e.g. someone opened a DM with them) —
     /// refetch `/api/rooms`. Sent targeted at the affected principal.
     RoomsChanged,

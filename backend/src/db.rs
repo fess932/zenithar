@@ -6,7 +6,7 @@ use sqlx::SqlitePool;
 
 use ulid::Ulid;
 
-use crate::models::{Attachment, ChatMessage, ReplyPreview, RoomSummary};
+use crate::models::{Attachment, ChatMessage, Reaction, ReplyPreview, RoomSummary};
 
 /// The single-writer pool (max 1 connection). SQLite serialises writes, so we
 /// funnel all of them through one connection — that's what lets the writer task
@@ -187,6 +187,26 @@ pub async fn messages_before(
         });
     }
 
+    // Reactions for the same messages, grouped per message → per emoji (in the
+    // order they were first added). `placeholders` is the same ?n list as above.
+    let react_sql = format!(
+        "SELECT message_id, emoji, principal_id FROM reactions
+         WHERE message_id IN ({placeholders}) ORDER BY created_at ASC, principal_id ASC"
+    );
+    let mut rq = sqlx::query_as::<_, (String, String, String)>(sqlx::AssertSqlSafe(react_sql));
+    for id in &ids {
+        rq = rq.bind(*id);
+    }
+    let mut react_by_msg: std::collections::HashMap<String, Vec<Reaction>> =
+        std::collections::HashMap::new();
+    for (mid, emoji, pid) in rq.fetch_all(pool).await? {
+        let list = react_by_msg.entry(mid).or_default();
+        match list.iter_mut().find(|r| r.emoji == emoji) {
+            Some(r) => r.by.push(pid),
+            None => list.push(Reaction { emoji, by: vec![pid] }),
+        }
+    }
+
     // query was DESC for the LIMIT; hand back oldest-first
     Ok(rows
         .into_iter()
@@ -195,6 +215,7 @@ pub async fn messages_before(
             let reply_to = r.reply_preview();
             ChatMessage {
                 attachments: by_msg.remove(&r.id).unwrap_or_default(),
+                reactions: react_by_msg.remove(&r.id).unwrap_or_default(),
                 id: r.id,
                 room_id: r.room_id,
                 author_id: r.author_id,
@@ -231,10 +252,14 @@ pub async fn edit_message(write: &SqlitePool, id: &str, body: &str, ts: i64) -> 
     Ok(())
 }
 
-/// Delete a message and its attachment rows. Permission is checked by the caller
-/// (author, or an admin). Attachment blobs on disk are left for a later GC.
+/// Delete a message and its attachment + reaction rows. Permission is checked by
+/// the caller (author, or an admin). Attachment blobs on disk are left for GC.
 pub async fn delete_message(write: &SqlitePool, id: &str) -> sqlx::Result<()> {
     sqlx::query("DELETE FROM attachments WHERE message_id = ?1")
+        .bind(id)
+        .execute(write)
+        .await?;
+    sqlx::query("DELETE FROM reactions WHERE message_id = ?1")
         .bind(id)
         .execute(write)
         .await?;
@@ -243,6 +268,56 @@ pub async fn delete_message(write: &SqlitePool, id: &str) -> sqlx::Result<()> {
         .execute(write)
         .await?;
     Ok(())
+}
+
+/// Toggle one emoji reaction for a principal on a message: remove it if present,
+/// otherwise add it. Permission (being in the room) is checked by the caller.
+pub async fn toggle_reaction(
+    write: &SqlitePool,
+    message_id: &str,
+    principal_id: &str,
+    emoji: &str,
+    ts: i64,
+) -> sqlx::Result<()> {
+    let removed = sqlx::query(
+        "DELETE FROM reactions WHERE message_id = ?1 AND principal_id = ?2 AND emoji = ?3",
+    )
+    .bind(message_id)
+    .bind(principal_id)
+    .bind(emoji)
+    .execute(write)
+    .await?;
+    if removed.rows_affected() == 0 {
+        sqlx::query(
+            "INSERT INTO reactions (message_id, principal_id, emoji, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(message_id)
+        .bind(principal_id)
+        .bind(emoji)
+        .bind(ts)
+        .execute(write)
+        .await?;
+    }
+    Ok(())
+}
+
+/// All reactions on one message, grouped per emoji (first-added order). Used to
+/// broadcast the fresh set after a toggle.
+pub async fn reactions_for_message(reads: &SqlitePool, message_id: &str) -> sqlx::Result<Vec<Reaction>> {
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT emoji, principal_id FROM reactions WHERE message_id = ?1 ORDER BY created_at ASC, principal_id ASC")
+            .bind(message_id)
+            .fetch_all(reads)
+            .await?;
+    let mut out: Vec<Reaction> = Vec::new();
+    for (emoji, pid) in rows {
+        match out.iter_mut().find(|r| r.emoji == emoji) {
+            Some(r) => r.by.push(pid),
+            None => out.push(Reaction { emoji, by: vec![pid] }),
+        }
+    }
+    Ok(out)
 }
 
 #[derive(sqlx::FromRow)]

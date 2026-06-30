@@ -216,6 +216,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                             created_at: crate::now_millis(),
                             edited_at: None,
                             attachments,
+                            reactions: Vec::new(),
                         };
                         // Fan out + (for anonymous clients) ping employees + write.
                         if crate::send::deliver(&state, chat, !is_employee).await.is_err() {
@@ -274,6 +275,50 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                                 }
                             }
                             _ => debug!(msg = %id, "delete denied or message gone"),
+                        }
+                    }
+                    Inbound::React { id, emoji } => {
+                        if !msg_bucket.check() {
+                            debug!("react rate-limited");
+                            continue;
+                        }
+                        // A single grapheme-ish emoji; reject empty / oversized input.
+                        let emoji = emoji.trim().to_string();
+                        if emoji.is_empty() || emoji.chars().count() > 8 {
+                            continue;
+                        }
+                        // Anyone in the room may react (not just the author).
+                        match db::message_meta(&state.reads, &id).await {
+                            Ok(Some((room, _author))) => {
+                                let in_room = client_room.as_deref().is_none_or(|r| r == room);
+                                if in_room
+                                    && db::toggle_reaction(
+                                        &state.db,
+                                        &id,
+                                        &principal.id,
+                                        &emoji,
+                                        crate::now_millis(),
+                                    )
+                                    .await
+                                    .is_ok()
+                                {
+                                    let reactions = db::reactions_for_message(&state.reads, &id)
+                                        .await
+                                        .unwrap_or_default();
+                                    let _ = state.signal.send(Signal {
+                                        room_id: room.clone(),
+                                        target: None,
+                                        exclude: None,
+                                        all_employees: false,
+                                        frame: Outbound::MessageReaction {
+                                            id,
+                                            room_id: room,
+                                            reactions,
+                                        },
+                                    });
+                                }
+                            }
+                            _ => debug!(msg = %id, "react: message gone"),
                         }
                     }
                     Inbound::CallStart { room_id } => {
