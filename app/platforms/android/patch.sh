@@ -57,9 +57,20 @@ class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
-    // Remember the host this launch logs into (from the deep link), so we can key
-    // the cookie by it later.
-    hostFromDeepLink(intent)?.let { prefs().edit().putString("host", it).apply() }
+    // A deep link logs us into a host. If it differs from last time, first
+    // unregister our push token from the OLD server (while its host+cookie are
+    // still in prefs) so it stops notifying us, then switch — clearing the stale
+    // cookie. The fresh login on the new host re-registers on the next onStop.
+    hostFromDeepLink(intent)?.let { newHost ->
+      val p = prefs()
+      val oldHost = p.getString("host", null)
+      if (oldHost != null && oldHost != newHost) {
+        val oldCookie = p.getString("cookie", null)
+        val token = p.getString("fcm_token", null)
+        if (oldCookie != null && token != null) PushReg.unregister(oldHost, oldCookie, token)
+      }
+      if (oldHost != newHost) p.edit().putString("host", newHost).remove("cookie").apply()
+    }
     // Plain relaunch → restore the saved cookie before the host loads. A deep link
     // brings its own fresh login, so skip restore there.
     if (intent?.action != Intent.ACTION_VIEW) restoreCookie()
@@ -135,14 +146,26 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 object PushReg {
+  // Register this device's token with the server currently in prefs (`host`).
   fun register(ctx: Context) {
     val p = ctx.getSharedPreferences("zenithar", Context.MODE_PRIVATE)
     val host = p.getString("host", null) ?: return
     val cookie = p.getString("cookie", null) ?: return
     val token = p.getString("fcm_token", null) ?: return
+    post("$host/api/push/register", cookie, token)
+  }
+
+  // Drop this device's token from a SPECIFIC server. Args are explicit (not read
+  // from prefs) so a host switch can unregister the OLD server even as prefs get
+  // overwritten with the new one — otherwise the old server keeps pushing to us.
+  fun unregister(host: String, cookie: String, token: String) {
+    post("$host/api/push/unregister", cookie, token)
+  }
+
+  private fun post(url: String, cookie: String, token: String) {
     Thread {
       try {
-        val c = (URL("$host/api/push/register").openConnection() as HttpURLConnection).apply {
+        val c = (URL(url).openConnection() as HttpURLConnection).apply {
           requestMethod = "POST"
           doOutput = true
           connectTimeout = 8000
