@@ -718,7 +718,13 @@ pub async fn list_rooms_for_user(
                 THEN (SELECT rm.principal_id FROM room_members rm
                       WHERE rm.room_id = r.id AND rm.principal_id <> ?1 LIMIT 1)
                 ELSE r.client_id END AS client_id,
-           r.created_at
+           r.created_at,
+           (SELECT m.created_at FROM messages m WHERE m.room_id = r.id
+              ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_at,
+           (SELECT m.body FROM messages m WHERE m.room_id = r.id
+              ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_body,
+           (SELECT m.author_name FROM messages m WHERE m.room_id = r.id
+              ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_author
          FROM rooms r
          LEFT JOIN principals cp ON cp.id = r.client_id
          WHERE r.kind IN ('common', 'client')

@@ -273,6 +273,9 @@ pub async fn rooms(
             title: None,
             client_id: Some(p.id.clone()),
             created_at: now_millis(),
+            last_at: None,
+            last_body: None,
+            last_author: None,
         }]
     };
     Ok(Json(list))

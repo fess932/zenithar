@@ -8,6 +8,7 @@
   import Call from "./Call.svelte";
   import Lightbox from "./Lightbox.svelte";
   import MessageMenu from "./MessageMenu.svelte";
+  import ChatList from "./ChatList.svelte";
   import { closeMessageMenu } from "./messageMenu";
   import { initCallSignaling } from "./call";
   import {
@@ -40,6 +41,13 @@
   let view: "chat" | "admin" = "chat";
   let drawerOpen = false;
 
+  // Mobile chat-list model (Telegram-style): the rooms list is the home screen
+  // and a conversation is pushed over it. `roomOpen` is driven by the History
+  // API so the Android back gesture pops room → list (and minimizes at the list,
+  // handled natively). Desktop keeps the drawer; clients have one room, no list.
+  let mobile = typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
+  let roomOpen = false;
+
   $: isEmployee = $me?.kind === "user";
 
   // Telegram-style day dividers: a label before the first message of each day.
@@ -67,6 +75,22 @@
     initCallSignaling();
     initNotifications();
     if (isEmployee) loadRooms();
+
+    // Track the mobile breakpoint and the in-app back stack. Opening a chat pushes
+    // a history entry; the back gesture pops it (popstate) → we drop to the list.
+    const mq = window.matchMedia("(max-width: 640px)");
+    const onMq = (): void => {
+      mobile = mq.matches;
+    };
+    const onPop = (): void => {
+      roomOpen = !!history.state?.zRoom;
+    };
+    mq.addEventListener("change", onMq);
+    window.addEventListener("popstate", onPop);
+    return () => {
+      mq.removeEventListener("change", onMq);
+      window.removeEventListener("popstate", onPop);
+    };
   });
 
   $: totalUnread = Object.values($unread).reduce((a, b) => a + b, 0);
@@ -128,22 +152,35 @@
     joinRoom(id);
     drawerOpen = false;
   }
+  // Mobile: open a chat as a pushed screen (back returns to the list).
+  function openRoom(id: string): void {
+    joinRoom(id);
+    history.pushState({ zRoom: id }, "");
+    roomOpen = true;
+  }
+  function mobileBack(): void {
+    history.back(); // popstate handler drops roomOpen → list
+  }
 </script>
 
 {#if view === "admin"}
   <Principals onBack={() => (view = "chat")} />
 {:else}
-  <div
-    class="grid h-dvh w-full max-w-full grid-cols-[minmax(0,1fr)] grid-rows-[auto_1fr_auto] overflow-x-hidden bg-ink font-sans text-[0.9375rem] text-text"
-  >
-    <Header
-      onOpenAdmin={() => (view = "admin")}
-      {isEmployee}
-      roomTitle={currentTitle}
-      unreadTotal={totalUnread}
-      onOpenRooms={openDrawer}
-      roomOnline={currentRoomOnline}
-    />
+  <div class="relative h-dvh w-full max-w-full overflow-hidden bg-ink">
+    <div
+      class="grid h-dvh w-full max-w-full grid-cols-[minmax(0,1fr)] grid-rows-[auto_1fr_auto] overflow-x-hidden bg-ink font-sans text-[0.9375rem] text-text"
+      inert={mobile && isEmployee && !roomOpen}
+    >
+      <Header
+        onOpenAdmin={() => (view = "admin")}
+        {isEmployee}
+        roomTitle={currentTitle}
+        unreadTotal={totalUnread}
+        onOpenRooms={openDrawer}
+        roomOnline={currentRoomOnline}
+        mode={mobile && isEmployee ? "room" : "drawer"}
+        onBack={mobileBack}
+      />
 
     <main
       bind:this={logEl}
@@ -178,11 +215,25 @@
       {/if}
     </main>
 
-    <Composer />
+      <Composer />
+    </div>
+
+    <!-- Mobile chat-list home: slides over the conversation; tapping a chat
+         pushes it (history), back pops to here, back here minimizes (native). -->
+    {#if mobile && isEmployee}
+      <div
+        class="absolute inset-0 z-30 grid grid-rows-[auto_1fr] overflow-hidden bg-ink font-sans text-[0.9375rem] text-text transition-transform duration-200 will-change-transform"
+        style:transform={roomOpen ? "translateX(-100%)" : "translateX(0)"}
+        inert={roomOpen}
+      >
+        <Header onOpenAdmin={() => (view = "admin")} {isEmployee} unreadTotal={totalUnread} mode="list" />
+        <ChatList onPick={openRoom} />
+      </div>
+    {/if}
   </div>
 
   <!-- Jump to latest: shown only when scrolled up from the bottom -->
-  {#if !pinned}
+  {#if !pinned && (!mobile || roomOpen)}
     <button
       type="button"
       onclick={scrollToBottom}
@@ -265,8 +316,8 @@
     </div>
   {/if}
 
-  <!-- Rooms drawer (employees) -->
-  {#if drawerOpen}
+  <!-- Rooms drawer (employees, desktop). Mobile uses the full-screen ChatList. -->
+  {#if drawerOpen && !mobile}
     <button
       type="button"
       aria-label={$t("dismiss")}

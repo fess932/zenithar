@@ -108,6 +108,12 @@
       // First: ask the native side where to go. If there's a saved login (a
       // pending deep link, or the last host), redirect there immediately — the
       // form never shows. Otherwise reveal the enter-server form.
+      //
+      // We navigate with location.replace (NOT Rust's `go`/win.navigate): replace
+      // swaps THIS landing entry for the host, so it leaves NO history entry. That
+      // way the Android back gesture (which walks the WebView history) can never
+      // land back on this login form — it stays inside the app, and "logging out"
+      // is only the explicit Logout button.
       (async () => {
         const inv = window.__TAURI__.core.invoke;
         try {
@@ -117,13 +123,13 @@
             try {
               localStorage.setItem("host", new URL(pending).origin);
             } catch (_) {}
-            await inv("go", { url: pending });
+            window.location.replace(pending);
             return;
           }
           // 2. Reopen the last host we used (kept here, in the landing's storage).
           const host = localStorage.getItem("host");
           if (host) {
-            await inv("go", { url: host });
+            window.location.replace(host);
             return;
           }
         } catch (_) {}

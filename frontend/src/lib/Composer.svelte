@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { t } from "./i18n";
   import { send, uploadFile, notify, replyingTo, editing, editMessage, MAX_UPLOAD_BYTES, type Attachment } from "./chat";
   import { EMOJI } from "./emoji";
@@ -113,6 +114,11 @@
     const a = await uploadFile(file);
     uploading = false;
     if (a) pending = [...pending, a];
+    // The input is disabled while uploading, which blurs it — so after a paste
+    // (or drop/pick) focus is gone and Enter no longer submits. Return focus once
+    // the field is enabled again so you can type a caption and hit Enter.
+    await tick();
+    inputEl?.focus();
   }
 
   function removePending(id: string): void {
@@ -340,12 +346,12 @@
   <!-- emoji panel -->
   {#if showEmoji}
     <div class="mb-2 max-h-44 overflow-y-auto rounded-md border border-line bg-surface-2 p-2">
-      <div class="grid grid-cols-8 gap-1 sm:grid-cols-10">
+      <div class="grid grid-cols-[repeat(auto-fill,minmax(2.25rem,1fr))] gap-1">
         {#each EMOJI as em}
           <button
             type="button"
             onclick={() => addEmoji(em)}
-            class="grid aspect-square cursor-pointer place-items-center rounded text-xl hover:bg-surface"
+            class="grid aspect-square cursor-pointer place-items-center rounded text-lg hover:bg-surface"
           >
             {em}
           </button>

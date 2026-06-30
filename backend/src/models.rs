@@ -56,6 +56,15 @@ pub struct RoomSummary {
     /// lets the UI show that client's online dot.
     pub client_id: Option<String>,
     pub created_at: i64,
+    /// Last message in the room, for the chat-list preview (Telegram-style row).
+    /// All `None` when the room has no messages yet. `last_body` may be empty for
+    /// an attachment-only message (the UI shows a generic marker then).
+    #[sqlx(default)]
+    pub last_at: Option<i64>,
+    #[sqlx(default)]
+    pub last_body: Option<String>,
+    #[sqlx(default)]
+    pub last_author: Option<String>,
 }
 
 /// One online principal, for the presence snapshot sent on connect.

@@ -41,6 +41,9 @@ export interface RoomSummary {
   title: string | null; // client/DM-peer name; null for the common room
   client_id: string | null; // client (or DM peer) id for the online dot; null for common
   created_at: number;
+  last_at: number | null; // time of the last message (chat-list preview); null if none
+  last_body: string | null; // last message body; "" for attachment-only messages
+  last_author: string | null; // last message sender's name
 }
 
 /// One online principal (presence snapshot entry).
@@ -224,6 +227,9 @@ export function connect(): void {
     // room no longer exists, leaving us on the default it already sent.
     const want = get(activeRoom) ?? rememberedRoom();
     if (want) ws?.send(JSON.stringify({ type: "join", room_id: want }));
+    // Refresh the rooms list on every (re)connect: its previews/unread aren't
+    // pushed live, so after a drop the list would otherwise stay stale.
+    void loadRooms();
     // Flush anything composed while offline (idempotent via client_msg_id).
     flushPending();
   };
@@ -379,6 +385,15 @@ export async function uploadFile(file: File): Promise<Attachment | null> {
     flash(get(t)("errUpload"));
     return null;
   }
+}
+
+/// Manual recovery (pull-to-refresh): refetch the rooms list and bounce the
+/// socket so it reconnects and re-pulls the open room's history — recovers from a
+/// half-dead WS where messages silently stopped arriving.
+export function resync(): void {
+  void loadRooms();
+  if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+  else connect();
 }
 
 export async function loadRooms(): Promise<void> {

@@ -16,6 +16,12 @@
   export let onOpenRooms: () => void = () => {};
   // null = no dot (common/own room); true/false = client online/offline.
   export let roomOnline: boolean | null = null;
+  // Layout context for the left side:
+  //   drawer — desktop / client: ☰ room switcher + current room (default).
+  //   list   — mobile chat-list home: just the app wordmark.
+  //   room   — mobile open conversation: ‹ back + room title.
+  export let mode: "drawer" | "list" | "room" = "drawer";
+  export let onBack: () => void = () => {};
 
   const statusKey = {
     connecting: "connecting",
@@ -46,12 +52,52 @@
     menuOpen = false;
     showAvatarEditor = true;
   }
+
+  // "What's new": the last commit subjects, pulled lazily from GitHub (open CORS,
+  // same source as the download link). Fetched once when the panel first opens.
+  const CHANGES_URL = "https://api.github.com/repos/fess932/zenithar/commits?per_page=10";
+  let changesOpen = false;
+  let commits: string[] | null = null;
+  let loadingChanges = false;
+  async function toggleChanges(): Promise<void> {
+    changesOpen = !changesOpen;
+    if (!changesOpen || commits !== null || loadingChanges) return;
+    loadingChanges = true;
+    try {
+      const r = await fetch(CHANGES_URL, { headers: { Accept: "application/vnd.github+json" } });
+      const data = r.ok ? ((await r.json()) as Array<{ commit?: { message?: string } }>) : [];
+      commits = data.map((c) => (c.commit?.message ?? "").split("\n")[0]).filter(Boolean);
+    } catch {
+      commits = [];
+    }
+    loadingChanges = false;
+  }
 </script>
 
 <header
   class="relative flex items-center gap-2 border-b border-line bg-surface px-3 pt-[calc(0.7rem+env(safe-area-inset-top))] pb-[0.7rem] sm:gap-3.5 sm:px-5"
 >
-  {#if isEmployee}
+  {#if mode === "list"}
+    <!-- Chat-list home (mobile): the app wordmark, no room. -->
+    <span class="pl-0.5 font-mono text-[0.82rem] uppercase tracking-[0.28em] text-beacon">Zenithar</span>
+  {:else if mode === "room"}
+    <!-- Open conversation (mobile): ‹ back to the list + room title. -->
+    <button
+      type="button"
+      onclick={onBack}
+      aria-label={$t("back")}
+      class="-ml-1.5 grid size-9 shrink-0 cursor-pointer place-items-center rounded-md text-muted hover:text-text"
+    >
+      <span class="text-2xl leading-none">‹</span>
+    </button>
+    <span class="truncate font-mono text-[0.9rem] text-text">{roomTitle}</span>
+    {#if roomOnline !== null}
+      <span
+        class="size-1.5 shrink-0 rounded-full {roomOnline ? 'bg-emerald-400' : 'bg-muted/50'}"
+        title={roomOnline ? "online" : "offline"}
+      ></span>
+    {/if}
+  {:else if isEmployee}
     <!-- Doubles as the room switcher: tap to open the drawer; label = current room. -->
     <button
       type="button"
@@ -80,8 +126,9 @@
   {/if}
 
   <div class="ml-auto flex items-center gap-2 sm:gap-3">
-    <!-- Place a call within the open room. Hidden once a call is up. -->
-    {#if $callState === "idle" && $activeRoom}
+    <!-- Place a call within the open room. Hidden once a call is up, and on the
+         chat-list home (no room context there). -->
+    {#if $callState === "idle" && $activeRoom && mode !== "list"}
       <button
         type="button"
         onclick={() => $activeRoom && startCall($activeRoom)}
@@ -245,6 +292,44 @@
         >
           {$t("openInApp")}
         </button>
+      {/if}
+      <!-- Latest app build: opens the GitHub release APK in the system browser to
+           download. Plain external link so it works in the browser and the app. -->
+      <a
+        href="https://github.com/fess932/zenithar/releases/download/latest/app-arm64-release.apk"
+        target="_blank"
+        rel="noopener noreferrer"
+        onclick={() => (menuOpen = false)}
+        class="block cursor-pointer rounded-md py-2 text-center font-mono text-[0.74rem] uppercase tracking-[0.08em] text-muted hover:text-text"
+      >
+        {$t("downloadApp")}
+      </a>
+      <!-- What's new: the latest commit subjects, lazily fetched from GitHub. -->
+      <button
+        type="button"
+        onclick={toggleChanges}
+        aria-expanded={changesOpen}
+        class="cursor-pointer rounded-md py-2 font-mono text-[0.74rem] uppercase tracking-[0.08em] text-muted hover:text-text"
+      >
+        {$t("recentChanges")}
+      </button>
+      {#if changesOpen}
+        <div class="max-h-44 overflow-y-auto rounded-md border border-line bg-surface px-2.5 py-2">
+          {#if loadingChanges}
+            <p class="font-mono text-[0.72rem] text-muted">…</p>
+          {:else if commits && commits.length}
+            <ul class="flex flex-col gap-1.5">
+              {#each commits as c}
+                <li class="font-mono text-[0.72rem] leading-snug text-text">
+                  <span class="text-muted">·</span>
+                  {c}
+                </li>
+              {/each}
+            </ul>
+          {:else}
+            <p class="font-mono text-[0.72rem] text-muted">—</p>
+          {/if}
+        </div>
       {/if}
       <button
         type="button"

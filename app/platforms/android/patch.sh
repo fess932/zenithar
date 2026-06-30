@@ -42,7 +42,11 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.View
+import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.WebView
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -75,6 +79,23 @@ class MainActivity : TauriActivity() {
     // brings its own fresh login, so skip restore there.
     if (intent?.action != Intent.ACTION_VIEW) restoreCookie()
     askNotifications()
+    // Back / edge-swipe walks the in-app WebView history (chat ↔ list). At the app
+    // ROOT — nothing left to pop — MINIMIZE instead of finishing the activity, so
+    // back never closes or "logs out" the app; it just backgrounds it (session and
+    // state kept, instant resume). Logout stays the explicit menu button only.
+    onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+      override fun handleOnBackPressed() {
+        val wv = findWebView(window.decorView)
+        if (wv != null && wv.canGoBack()) wv.goBack() else moveTaskToBack(true)
+      }
+    })
+  }
+
+  // The wry-created WebView lives somewhere in the activity's view tree.
+  private fun findWebView(v: View): WebView? {
+    if (v is WebView) return v
+    if (v is ViewGroup) for (i in 0 until v.childCount) findWebView(v.getChildAt(i))?.let { return it }
+    return null
   }
 
   override fun onStop() {
