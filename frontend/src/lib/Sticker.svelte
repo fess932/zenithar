@@ -1,7 +1,9 @@
 <script module lang="ts">
   import { DotLottie } from "@lottiefiles/dotlottie-web";
-  // Self-host the WASM (no CDN) — the build copies it into /assets. Set once.
-  DotLottie.setWasmUrl("/assets/dotlottie-player.wasm");
+  import { DOTLOTTIE_WASM_URL } from "./dotlottieWasm";
+  // Self-host the WASM (no CDN) — the build copies it under a versioned name so it
+  // can be cached immutably. Set once for all Sticker instances.
+  DotLottie.setWasmUrl(DOTLOTTIE_WASM_URL);
 </script>
 
 <script lang="ts">

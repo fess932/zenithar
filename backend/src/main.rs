@@ -3,11 +3,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use axum::extract::DefaultBodyLimit;
-use axum::http::{header, StatusCode, Uri};
+use axum::http::{header, HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, patch, post};
 use axum::Router;
 use tokio::sync::broadcast;
+use tower_http::compression::CompressionLayer;
 use tower_http::trace::TraceLayer;
 use tracing::{error, info};
 
@@ -43,11 +44,14 @@ use state::AppState;
 struct Assets;
 
 /// Serve an embedded asset, falling back to index.html for unknown paths.
-async fn static_handler(uri: Uri) -> Response {
+async fn static_handler(headers: HeaderMap, uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
     let path = if path.is_empty() { "index.html" } else { path };
-    serve_asset(path)
-        .or_else(|| serve_asset("index.html"))
+    let inm = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok());
+    serve_asset(path, inm)
+        .or_else(|| serve_asset("index.html", inm))
         .unwrap_or_else(|| {
             (
                 StatusCode::NOT_FOUND,
@@ -57,15 +61,57 @@ async fn static_handler(uri: Uri) -> Response {
         })
 }
 
-fn serve_asset(path: &str) -> Option<Response> {
+/// Serve one embedded asset with an ETag (content hash) + a path-appropriate
+/// `Cache-Control`, answering `304 Not Modified` when the client's ETag matches.
+fn serve_asset(path: &str, if_none_match: Option<&str>) -> Option<Response> {
     let file = Assets::get(path)?;
+    let mut etag = String::with_capacity(34);
+    etag.push('"');
+    for b in &file.metadata.sha256_hash()[..16] {
+        use std::fmt::Write;
+        let _ = write!(etag, "{b:02x}");
+    }
+    etag.push('"');
+    let cache = cache_control_for(path);
+
+    if if_none_match == Some(etag.as_str()) {
+        return Some(
+            (
+                StatusCode::NOT_MODIFIED,
+                [(header::ETAG, etag), (header::CACHE_CONTROL, cache.into())],
+            )
+                .into_response(),
+        );
+    }
     let mime = file.metadata.mimetype().to_owned();
-    Some(([(header::CONTENT_TYPE, mime)], file.data.into_owned()).into_response())
+    Some(
+        (
+            [
+                (header::CONTENT_TYPE, mime),
+                (header::CACHE_CONTROL, cache.into()),
+                (header::ETAG, etag),
+            ],
+            file.data.into_owned(),
+        )
+            .into_response(),
+    )
+}
+
+/// Cache policy by path. Only content whose NAME can't change meaning gets
+/// `immutable`; everything else revalidates cheaply via the ETag (304).
+fn cache_control_for(path: &str) -> &'static str {
+    match path {
+        p if p.ends_with(".html") => "no-cache", // entry shell — always revalidate
+        p if p.contains("dotlottie-player-") => "public, max-age=31536000, immutable", // versioned wasm
+        p if p.starts_with("assets/stickers/") => "public, max-age=604800", // stickers — a week
+        p if p.starts_with("assets/") => "public, max-age=86400", // icons/manifest — a day
+        _ => "no-cache", // un-fingerprinted bundle (main.js/styles.css) — revalidate (304)
+    }
 }
 
 /// The SPA shell — served after a successful link login (`/i/:token`).
 pub fn index_html_response() -> Response {
-    serve_asset("index.html")
+    serve_asset("index.html", None)
         .unwrap_or_else(|| (StatusCode::NOT_FOUND, "frontend not built").into_response())
 }
 
@@ -417,6 +463,10 @@ async fn main() -> Result<()> {
                 tower_http::trace::DefaultMakeSpan::new().level(tracing::Level::INFO),
             ),
         )
+        // Self-contained compression (br/gzip/zstd) so the big wasm + JS/CSS go over
+        // the wire ~3× smaller without depending on the reverse proxy. The default
+        // predicate skips already-compressed types (images) and tiny bodies.
+        .layer(CompressionLayer::new())
         // Added AFTER the trace layer so they're NOT traced (avoid telemetry
         // noise): the loopback health probe, and the GreptimeDB dashboard
         // reverse-proxy — whose own /dashboard*,/v1/* traffic would otherwise echo

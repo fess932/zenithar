@@ -3,6 +3,7 @@
 //   bun run scripts/build.ts --watch  rebuild src/ on change
 import { $ } from "bun";
 import { SveltePlugin } from "bun-plugin-svelte";
+import { DOTLOTTIE_WASM_URL } from "../src/lib/dotlottieWasm";
 
 const watch = process.argv.includes("--watch");
 
@@ -49,10 +50,11 @@ const copyStickers = async (): Promise<void> => {
   );
 };
 
-// The dotLottie (ThorVG) WASM, self-hosted — Sticker.svelte's setWasmUrl points here.
+// The dotLottie (ThorVG) WASM, self-hosted under a VERSIONED name (single source
+// of truth in dotlottieWasm.ts) so the backend can serve it `immutable`.
 const copyWasm = () =>
   Bun.write(
-    "dist/assets/dotlottie-player.wasm",
+    `dist/assets/${DOTLOTTIE_WASM_URL.split("/").pop()}`,
     Bun.file("node_modules/@lottiefiles/dotlottie-web/dist/dotlottie-player.wasm"),
   );
 
