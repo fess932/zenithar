@@ -19,48 +19,32 @@
     ? m.reply_to.body.trim() || (m.reply_to.has_attachment ? $t("attachment") : "")
     : "";
 
-  // Open the context menu: long-press on touch, plain click on desktop. (Clicks
-  // on interactive children — images, attachments, the quote — are left alone.)
-  let pressTimer: ReturnType<typeof setTimeout> | null = null;
-  let pressX = 0;
-  let pressY = 0;
+  // Open the context menu (reactions + actions): a plain TAP on touch, a
+  // RIGHT-click on desktop. Taps/clicks on interactive children — images, the
+  // quote, links — are left to act on their own.
   let lastType = "mouse";
 
-  function clearPress(): void {
-    if (pressTimer) {
-      clearTimeout(pressTimer);
-      pressTimer = null;
-    }
-  }
-
   function onPointerDown(e: PointerEvent): void {
-    lastType = e.pointerType;
-    if (e.pointerType === "mouse") return; // desktop opens on click instead
-    pressX = e.clientX;
-    pressY = e.clientY;
-    clearPress();
-    pressTimer = setTimeout(() => {
-      navigator.vibrate?.(15);
-      openMessageMenu(m, pressX, pressY);
-    }, 450);
-  }
-
-  function onPointerMove(e: PointerEvent): void {
-    if (pressTimer && (Math.abs(e.clientX - pressX) > 10 || Math.abs(e.clientY - pressY) > 10)) {
-      clearPress();
-    }
+    lastType = e.pointerType; // remember touch vs mouse for the handlers below
   }
 
   function isInteractive(target: EventTarget | null): boolean {
     return target instanceof Element && target.closest("button, a") !== null;
   }
 
-  // Desktop opens the menu on RIGHT-click (like Telegram); left-click does
-  // nothing. Touch uses long-press (above). Right-clicking an image/link/quote is
-  // left to the browser so "save image" etc. still work.
+  // Touch: a normal tap opens the menu. Desktop ignores left-click (uses
+  // right-click below).
+  function onTap(e: MouseEvent): void {
+    if (lastType === "mouse") return;
+    if (isInteractive(e.target)) return;
+    openMessageMenu(m, e.clientX, e.clientY);
+  }
+
+  // Desktop right-click opens the menu; suppress the native menu on the bubble.
+  // (On touch a long-press also fires this — just swallow it; the tap handles it.)
   function onContextMenu(e: MouseEvent): void {
     if (isInteractive(e.target)) return; // leave the native menu on media/links
-    e.preventDefault(); // suppress the native menu on the bubble body
+    e.preventDefault();
     if (lastType === "mouse") openMessageMenu(m, e.clientX, e.clientY);
   }
 
@@ -107,9 +91,7 @@
     class:cont={!firstInGroup}
     class:flash={$highlightId === m.id}
     onpointerdown={onPointerDown}
-    onpointermove={onPointerMove}
-    onpointerup={clearPress}
-    onpointercancel={clearPress}
+    onclick={onTap}
     oncontextmenu={onContextMenu}
   >
     {#if m.reply_to}
