@@ -2,26 +2,13 @@
   import { rooms, activeRoom, unread, online, resync, loadRooms, type RoomSummary } from "./chat";
   import { mutedRooms, toggleMute } from "./notify";
   import { t, lang } from "./i18n";
+  import { roomLabel, roomPreview } from "./util/rooms";
   import Avatar from "./Avatar.svelte";
 
   export let onPick: (id: string) => void;
 
   $: onlineEmployees = Object.values($online).filter((k) => k === "user").length;
   const isClientOnline = (r: RoomSummary): boolean => !!(r.client_id && $online[r.client_id]);
-
-  function roomLabel(r: RoomSummary): string {
-    if (r.kind === "common") return $t("room");
-    if (r.kind === "direct") return `@${r.title ?? "?"}`; // @handle = a person
-    return r.title ?? "—";
-  }
-
-  // Last-message preview. In group-like rooms (common/client) prefix the sender;
-  // a 1:1 direct room needs no name. Empty body = attachment-only → a clip marker.
-  function preview(r: RoomSummary): string {
-    const text = (r.last_body ?? "").trim() || "📎";
-    if (r.kind === "direct") return text;
-    return r.last_author ? `${r.last_author}: ${text}` : text;
-  }
 
   // Telegram-style timestamp: today → HH:MM, yesterday → label, this week →
   // weekday, older → date.
@@ -107,7 +94,7 @@
         {@const count = $unread[r.id] ?? 0}
         {@const muted = $mutedRooms.has(r.id)}
         {@const live = r.kind === "common" ? onlineEmployees > 0 : isClientOnline(r)}
-        {@const label = roomLabel(r)}
+        {@const label = roomLabel(r, $t("room"))}
         <div class="flex items-stretch border-b border-line/40">
           <button
             type="button"
@@ -139,7 +126,7 @@
                 {/if}
               </div>
               <div class="mt-0.5 flex items-center gap-2">
-                <span class="min-w-0 flex-1 truncate text-[0.8rem] text-muted">{preview(r)}</span>
+                <span class="min-w-0 flex-1 truncate text-[0.8rem] text-muted">{roomPreview(r)}</span>
                 {#if muted}<span class="shrink-0 text-[0.7rem] opacity-60">🔕</span>{/if}
                 {#if count > 0}
                   <span

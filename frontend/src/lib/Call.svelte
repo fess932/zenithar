@@ -2,7 +2,7 @@
   import { fly } from "svelte/transition";
   import { backOut, bounceOut } from "svelte/easing";
   import { t } from "./i18n";
-  import { fmtDur } from "./format";
+  import { fmtDur } from "./util/format";
   import {
     callState,
     callElapsed,

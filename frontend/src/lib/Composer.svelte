@@ -4,7 +4,7 @@
   import { send, sendSticker, uploadFile, notify, replyingTo, editing, editMessage, MAX_UPLOAD_BYTES, type Attachment } from "./chat";
   import { EMOJI } from "./emoji";
   import { getMicStream } from "./mic";
-  import { fmtDur } from "./format";
+  import { fmtDur } from "./util/format";
   import Sticker from "./Sticker.svelte";
   import { STICKERS } from "./stickers";
   import { listSaved, sendSaved, uploadSaved, savedThumb, savedUrl, type SavedItem } from "./saved";

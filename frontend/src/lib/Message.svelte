@@ -9,8 +9,9 @@
   import { openLightbox } from "./lightbox";
   import { openMessageMenu } from "./messageMenu";
   import { openProfile } from "./profile";
-  import { linkify } from "./linkify";
-  import { fmtSize } from "./format";
+  import { linkify } from "./util/linkify";
+  import { fmtSize } from "./util/format";
+  import { fmtTime, fullTime } from "./util/time";
 
   export let m: ChatMessage;
 
@@ -64,19 +65,6 @@
       .querySelector(`[data-mid="${id}"]`)
       ?.scrollIntoView({ behavior: "smooth", block: "center" });
     flashMessage(id);
-  }
-
-  function fmtTime(ms: number): string {
-    const d = new Date(ms);
-    const p = (n: number) => String(n).padStart(2, "0");
-    return `${p(d.getHours())}:${p(d.getMinutes())}`;
-  }
-  // Full precision (with seconds) for the hover tooltip — the old log view
-  // showed seconds inline; here they move to the title so the line stays clean.
-  function fullTime(ms: number): string {
-    const d = new Date(ms);
-    const p = (n: number) => String(n).padStart(2, "0");
-    return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
   }
 
 

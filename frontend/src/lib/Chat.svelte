@@ -12,6 +12,8 @@
   import Profile from "./Profile.svelte";
   import { profileTarget, closeProfile } from "./profile";
   import { closeMessageMenu } from "./messageMenu";
+  import { sameDay } from "./util/time";
+  import { roomLabel } from "./util/rooms";
   import { initCallSignaling } from "./call";
   import {
     messages,
@@ -56,15 +58,6 @@
   $: isEmployee = $me?.kind === "user";
 
   // Telegram-style day dividers: a label before the first message of each day.
-  function sameDay(a: number, b: number): boolean {
-    const x = new Date(a);
-    const y = new Date(b);
-    return (
-      x.getFullYear() === y.getFullYear() &&
-      x.getMonth() === y.getMonth() &&
-      x.getDate() === y.getDate()
-    );
-  }
   function dayLabel(ms: number): string {
     const now = Date.now();
     if (sameDay(ms, now)) return $t("today");
@@ -131,14 +124,8 @@
     if (pinned && logEl) logEl.scrollTop = logEl.scrollHeight;
   });
 
-  function roomLabel(r: RoomSummary): string {
-    if (r.kind === "common") return $t("room");
-    if (r.kind === "direct") return `@${r.title ?? "?"}`; // @handle = a person
-    return r.title ?? "—";
-  }
-
   $: current = $rooms.find((r) => r.id === $activeRoom) ?? null;
-  $: currentTitle = current ? roomLabel(current) : $t("room");
+  $: currentTitle = current ? roomLabel(current, $t("room")) : $t("room");
 
   // In a DM, the peer (other member) → a tappable avatar in the header. The avatar
   // value comes from their messages (resolved live), default emoji until then.
@@ -396,7 +383,7 @@
                 class="size-2 shrink-0 rounded-full {live ? 'bg-emerald-400' : 'bg-muted/40'}"
                 title={live ? "online" : "offline"}
               ></span>
-              <span class="flex-1 truncate">{roomLabel(r)}</span>
+              <span class="flex-1 truncate">{roomLabel(r, $t("room"))}</span>
               {#if r.kind === "common" && onlineEmployees > 0}
                 <span class="shrink-0 font-mono text-[0.72rem] text-muted">{onlineEmployees}</span>
               {/if}

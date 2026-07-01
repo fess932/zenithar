@@ -6,6 +6,14 @@
   import { me, renameMe, logout, openInApp } from "./session";
   import { openProfile } from "./profile";
   import { selectedMic, listMics, type MicDevice } from "./mic";
+  import {
+    detectOS,
+    pickAsset,
+    OS_NAME,
+    RELEASES_PAGE,
+    RELEASE_API,
+    type ReleaseAsset,
+  } from "./util/download";
   import { isApp } from "./platform";
   import Connections from "./Connections.svelte";
   import Avatar from "./Avatar.svelte";
@@ -64,6 +72,26 @@
     menuOpen = false;
     showAvatarEditor = true;
   }
+
+  // Platform-aware download: resolve the right release asset for the current OS
+  // lazily from the GitHub API when the menu opens (pure logic in download.ts).
+  const os = detectOS(typeof navigator !== "undefined" ? navigator.userAgent : "");
+  let downloadUrl = RELEASES_PAGE; // resolved to a direct asset once loaded
+  let dlLoaded = false;
+  async function loadDownload(): Promise<void> {
+    if (dlLoaded) return;
+    dlLoaded = true;
+    try {
+      const r = await fetch(RELEASE_API, { headers: { Accept: "application/vnd.github+json" } });
+      if (!r.ok) return;
+      const assets = ((await r.json()) as { assets?: ReleaseAsset[] }).assets ?? [];
+      const hit = pickAsset(os, assets);
+      if (hit) downloadUrl = hit;
+    } catch {
+      /* keep the releases-page fallback */
+    }
+  }
+  $: if (menuOpen) void loadDownload();
 
   // "What's new": the last commit subjects, pulled lazily from GitHub (open CORS,
   // same source as the download link). Fetched once when the panel first opens.
@@ -352,16 +380,17 @@
           {$t("openInApp")}
         </button>
       {/if}
-      <!-- Latest app build: opens the GitHub release APK in the system browser to
-           download. Plain external link so it works in the browser and the app. -->
+      <!-- Latest app build for THIS OS (Windows/macOS/Android), resolved from the
+           GitHub release; falls back to the releases page. Plain external link so
+           it works in the browser and inside the app. -->
       <a
-        href="https://github.com/fess932/zenithar/releases/download/latest/app-arm64-release.apk"
+        href={downloadUrl}
         target="_blank"
         rel="noopener noreferrer"
         onclick={() => (menuOpen = false)}
         class="block cursor-pointer rounded-md py-2 text-center font-mono text-[0.74rem] uppercase tracking-[0.08em] text-muted hover:text-text"
       >
-        {$t("downloadApp")}
+        {$t("downloadApp")}{#if OS_NAME[os]} · {OS_NAME[os]}{/if}
       </a>
       <!-- What's new: the latest commit subjects, lazily fetched from GitHub. -->
       <button
