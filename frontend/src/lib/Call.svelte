@@ -2,6 +2,7 @@
   import { fly } from "svelte/transition";
   import { backOut, bounceOut } from "svelte/easing";
   import { t } from "./i18n";
+  import { fmtDur } from "./format";
   import {
     callState,
     callElapsed,
@@ -35,11 +36,6 @@
     typeof window !== "undefined" &&
     !!window.matchMedia?.("(pointer: coarse)").matches;
 
-  function fmtDur(s: number): string {
-    const m = Math.floor(s / 60);
-    const sec = Math.floor(s % 60);
-    return `${m}:${String(sec).padStart(2, "0")}`;
-  }
 
   // The idle "start call" button now lives in the header (Header.svelte) so it
   // never floats over the transcript; this component owns the active/ringing UI.

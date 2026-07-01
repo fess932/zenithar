@@ -25,7 +25,10 @@ make fmt        # format
 - `backend/` — Rust (axum). WS chat at `/ws`, health at `/api/health`. SQLite via sqlx
   with a batching writer (≤50ms / ≤16 messages per transaction). DB lives in the
   git-ignored `backend/data/`. The built frontend is embedded via `rust-embed`.
-- `frontend/` — TypeScript client built with bun. Single team room, realtime over WS.
+- `frontend/` — Svelte 5 + TypeScript, built with bun. Realtime over WS; stickers via
+  self-hosted dotLottie (ThorVG WASM). Pure helpers are unit-tested (`make fe-test`).
+- `app/` — Tauri v2 native shell (Windows/macOS/Linux/Android). Web-first: the web app
+  never depends on Tauri. Built in CI; Android adds FCM push. See [docs/ideas.md](docs/ideas.md).
 
 ## Auth (passwordless, link-based)
 
@@ -42,11 +45,15 @@ See [docs/plans/phase-1-auth.md](docs/plans/phase-1-auth.md).
 
 ## Status
 
-- **Phase 0** — realtime chat in the common room with batched persistence.
-- **Phase 1** — passwordless link auth: sessions, unified principals, link
-  management UI, identity-stamped messages.
+Phases 0–7 are in: realtime chat + rooms, passwordless link auth, attachments /
+voice / emoji, WebRTC voice calls with server-side recording, the REST integration
+API, and the production hardening (presence, WS reconnect, rate limits). On top of
+that: stickers, emoji reactions, saved images ("сохранёнки") + profiles, in-message
+links, a Telegram-style mobile UI with Android FCM push, a mic picker, and
+self-contained static-asset caching + compression.
 
-See the roadmap in [requirements.md](requirements.md).
+Full checklist and roadmap in [requirements.md](requirements.md); design decisions
+in [docs/design-notes.md](docs/design-notes.md).
 
 ## Integration API
 
@@ -93,4 +100,6 @@ mkdir -p data && docker compose up -d   # then open the admin link from the logs
 - `ZENITHAR_PUBLIC_IP` — public IP(s) to advertise for calls when behind NAT/DMZ (NAT 1:1); see [docs/deploy.md](docs/deploy.md)
 - `ZENITHAR_UDP_PORTS` — media UDP port range for calls (one socket per participant, bound `0.0.0.0`), e.g. `51000-51200` (forward the whole range); empty = ephemeral
 - `ZENITHAR_SECURE_COOKIES` — set `1`/`true` to mark auth cookies `Secure` (behind TLS)
+- `ZENITHAR_FCM_CREDENTIALS` — path to the Firebase service-account JSON for Android push
+  (default `/data/fcm-sa.json`); absent → push disabled, server runs as usual
 - `RUST_LOG` — log filter (default `info`)

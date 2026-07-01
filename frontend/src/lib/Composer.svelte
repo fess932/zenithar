@@ -4,6 +4,7 @@
   import { send, sendSticker, uploadFile, notify, replyingTo, editing, editMessage, MAX_UPLOAD_BYTES, type Attachment } from "./chat";
   import { EMOJI } from "./emoji";
   import { getMicStream } from "./mic";
+  import { fmtDur } from "./format";
   import Sticker from "./Sticker.svelte";
   import { STICKERS } from "./stickers";
   import { listSaved, sendSaved, uploadSaved, savedThumb, savedUrl, type SavedItem } from "./saved";
@@ -61,11 +62,6 @@
   let recSeconds = 0;
   let recTimer: ReturnType<typeof setInterval> | null = null;
 
-  function fmtDur(s: number): string {
-    const m = Math.floor(s / 60);
-    const sec = Math.floor(s % 60);
-    return `${m}:${String(sec).padStart(2, "0")}`;
-  }
 
   function stopTimer(): void {
     if (recTimer) clearInterval(recTimer);

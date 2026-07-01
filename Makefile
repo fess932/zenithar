@@ -76,6 +76,10 @@ fe-dev: fe-install ## Rebuild frontend on change (run alongside `make dev`)
 fe-typecheck: fe-install ## Type-check frontend
 	$(BUN) bun run typecheck
 
+.PHONY: fe-test
+fe-test: fe-install ## Run frontend unit tests (bun test — pure functions, no browser)
+	$(BUN) bun test
+
 # ---- desktop app (Tauri) ----------------------------------------------------
 APP := app
 # Android (macOS host): SDK location + the NDK version to auto-install if missing.

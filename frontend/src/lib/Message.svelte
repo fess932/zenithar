@@ -9,6 +9,8 @@
   import { openLightbox } from "./lightbox";
   import { openMessageMenu } from "./messageMenu";
   import { openProfile } from "./profile";
+  import { linkify } from "./linkify";
+  import { fmtSize } from "./format";
 
   export let m: ChatMessage;
 
@@ -77,11 +79,6 @@
     return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
   }
 
-  function fmtSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
 
   const orig = (id: string) => `/api/attachments/${id}`;
   const thumb = (id: string) => `/api/attachments/${id}/thumb`;
@@ -115,7 +112,15 @@
       </button>
     {/if}
 
-    {#if m.body}<span class="whitespace-pre-wrap break-words">{m.body}</span>{/if}
+    {#if m.body}<span class="whitespace-pre-wrap break-words"
+        >{#each linkify(m.body) as part}{#if part.href}<a
+              href={part.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="text-beacon underline underline-offset-2 hover:brightness-110"
+              >{part.text}</a
+            >{:else}{part.text}{/if}{/each}</span
+      >{/if}
     {#if m.edited_at}<span
         class="ml-1 align-baseline text-[0.7rem] text-muted"
         title={$t("edited")}>({$t("edited")})</span

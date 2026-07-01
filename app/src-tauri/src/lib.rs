@@ -119,6 +119,30 @@ fn go(app: tauri::AppHandle, url: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Durable host memory: the landing's `localStorage` on Windows/WebView2 can get
+/// dropped on restart even with `useHttpsScheme`, so we ALSO persist the last host
+/// to a small file in the app config dir (Rust-owned, survives regardless). The
+/// landing reads this first and falls back to localStorage.
+fn host_file(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    let dir = app.path().app_config_dir().ok()?;
+    let _ = std::fs::create_dir_all(&dir);
+    Some(dir.join("host.txt"))
+}
+
+#[tauri::command]
+fn save_host(app: tauri::AppHandle, host: String) {
+    if let Some(path) = host_file(&app) {
+        let _ = std::fs::write(path, host.trim());
+    }
+}
+
+#[tauri::command]
+fn load_host(app: tauri::AppHandle) -> Option<String> {
+    let contents = std::fs::read_to_string(host_file(&app)?).ok()?;
+    let host = contents.trim().to_string();
+    (!host.is_empty()).then_some(host)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "android")]
@@ -142,7 +166,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![pending_login, go])
+        .invoke_handler(tauri::generate_handler![pending_login, go, save_host, load_host])
         .setup(|app| {
             // Register the scheme at runtime for dev on Win/Linux (bundled desktop
             // apps get it from the installer / Info.plist; Android from its manifest).
