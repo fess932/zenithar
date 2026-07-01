@@ -8,6 +8,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, patch, post};
 use axum::Router;
 use tokio::sync::broadcast;
+use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Predicate};
 use tower_http::compression::CompressionLayer;
 use tower_http::trace::TraceLayer;
 use tracing::{error, info};
@@ -396,7 +397,7 @@ async fn main() -> Result<()> {
         .route("/api/people", get(routes::people))
         .route(
             "/api/upload",
-            post(uploads::upload).layer(DefaultBodyLimit::max(uploads::MAX_UPLOAD_BYTES + 1024)),
+            post(uploads::upload).layer(DefaultBodyLimit::max(uploads::MAX_VIDEO_BYTES + 1024)),
         )
         .route("/api/attachments/{id}", get(uploads::serve))
         .route("/api/attachments/{id}/thumb", get(uploads::serve_thumb))
@@ -405,7 +406,7 @@ async fn main() -> Result<()> {
         .route("/api/saved/of/{principal_id}", get(saved::list_of))
         .route(
             "/api/saved/upload",
-            post(uploads::upload_saved).layer(DefaultBodyLimit::max(uploads::MAX_UPLOAD_BYTES + 1024)),
+            post(uploads::upload_saved).layer(DefaultBodyLimit::max(uploads::MAX_VIDEO_BYTES + 1024)),
         )
         .route("/api/saved/from/{attachment_id}", post(saved::save_from))
         .route("/api/saved/{id}", patch(saved::set_public).delete(saved::delete))
@@ -452,7 +453,7 @@ async fn main() -> Result<()> {
         )
         .route(
             "/api/v1/uploads",
-            post(api::upload).layer(DefaultBodyLimit::max(uploads::MAX_UPLOAD_BYTES + 1024)),
+            post(api::upload).layer(DefaultBodyLimit::max(uploads::MAX_VIDEO_BYTES + 1024)),
         )
         .fallback(static_handler)
         // INFO-level request spans so every HTTP request becomes an exported
@@ -466,7 +467,15 @@ async fn main() -> Result<()> {
         // Self-contained compression (br/gzip/zstd) so the big wasm + JS/CSS go over
         // the wire ~3× smaller without depending on the reverse proxy. The default
         // predicate skips already-compressed types (images) and tiny bodies.
-        .layer(CompressionLayer::new())
+        .layer(
+            // Skip already-compressed media (images are skipped by default; add
+            // video/audio) — compressing them wastes CPU and breaks range/streaming.
+            CompressionLayer::new().compress_when(
+                DefaultPredicate::new()
+                    .and(NotForContentType::const_new("video/"))
+                    .and(NotForContentType::const_new("audio/")),
+            ),
+        )
         // Added AFTER the trace layer so they're NOT traced (avoid telemetry
         // noise): the loopback health probe, and the GreptimeDB dashboard
         // reverse-proxy — whose own /dashboard*,/v1/* traffic would otherwise echo

@@ -17,10 +17,20 @@ use crate::state::AppState;
 use crate::storage::{thumb_key, Storage};
 use crate::{db, now_millis};
 
-/// 40 MB ceiling per upload (also enforced as the route body limit). Sized to
-/// admit short MP4 clips alongside images and voice notes.
+/// Default per-upload ceiling (images, files, voice). Videos get a bigger one.
 pub const MAX_UPLOAD_BYTES: usize = 40 * 1024 * 1024;
+/// Videos are legitimately large → 200 MB. Also the route body limit (below).
+pub const MAX_VIDEO_BYTES: usize = 200 * 1024 * 1024;
 const THUMB_MAX: u32 = 320;
+
+/// Per-upload byte ceiling by declared content type: 200 MB for video, else 40 MB.
+fn size_limit(declared_ct: &Option<String>) -> usize {
+    if declared_ct.as_deref().is_some_and(|ct| ct.starts_with("video/")) {
+        MAX_VIDEO_BYTES
+    } else {
+        MAX_UPLOAD_BYTES
+    }
+}
 
 /// `POST /api/upload` — multipart `room_id` + `file`, browser path (cookie auth +
 /// CSRF origin check). Returns the attachment meta.
@@ -78,7 +88,7 @@ pub async fn ingest(state: &AppState, p: &Principal, mut multipart: Multipart) -
     if bytes.is_empty() {
         return (StatusCode::BAD_REQUEST, "empty file").into_response();
     }
-    if bytes.len() > MAX_UPLOAD_BYTES {
+    if bytes.len() > size_limit(&declared_ct) {
         return (StatusCode::PAYLOAD_TOO_LARGE, "file too large").into_response();
     }
     if !can_access(&state.reads, p, &room_id).await {
@@ -160,7 +170,7 @@ pub async fn upload_saved(
     if bytes.is_empty() {
         return (StatusCode::BAD_REQUEST, "empty file").into_response();
     }
-    if bytes.len() > MAX_UPLOAD_BYTES {
+    if bytes.len() > size_limit(&declared_ct) {
         return (StatusCode::PAYLOAD_TOO_LARGE, "file too large").into_response();
     }
 
@@ -244,13 +254,19 @@ fn process_and_store(
     Ok(prepared)
 }
 
-/// `GET /api/attachments/:id` — the original bytes (inline).
+/// `GET /api/attachments/:id` — the original bytes (inline). Supports HTTP range
+/// requests so video seeks/streams instead of downloading the whole file.
 pub async fn serve(
     State(state): State<AppState>,
     Identity(p): Identity,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    serve_inner(state, p, &id, false).await
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    serve_inner(state, p, &id, false, range).await
 }
 
 /// `GET /api/attachments/:id/thumb` — the JPEG thumbnail (images only).
@@ -259,10 +275,37 @@ pub async fn serve_thumb(
     Identity(p): Identity,
     Path(id): Path<String>,
 ) -> Response {
-    serve_inner(state, p, &id, true).await
+    serve_inner(state, p, &id, true, None).await
 }
 
-async fn serve_inner(state: AppState, p: Principal, id: &str, thumb: bool) -> Response {
+/// Parse a single-range `Range: bytes=…` header into an inclusive `(start, end)`
+/// within `total`. Handles `start-`, `start-end`, and `-suffix`; None if bad.
+fn parse_range(header: &str, total: u64) -> Option<(u64, u64)> {
+    if total == 0 {
+        return None;
+    }
+    let (s, e) = header.trim().strip_prefix("bytes=")?.split_once('-')?;
+    let (start, end) = if s.is_empty() {
+        (total.saturating_sub(e.parse().ok()?), total - 1)
+    } else {
+        let start = s.parse().ok()?;
+        let end = if e.is_empty() {
+            total - 1
+        } else {
+            e.parse::<u64>().ok()?.min(total - 1)
+        };
+        (start, end)
+    };
+    (start <= end && start < total).then_some((start, end))
+}
+
+async fn serve_inner(
+    state: AppState,
+    p: Principal,
+    id: &str,
+    thumb: bool,
+    range: Option<String>,
+) -> Response {
     let Ok(Some((room_id, att))) = db::lookup_attachment(&state.reads, id).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -274,26 +317,60 @@ async fn serve_inner(state: AppState, p: Principal, id: &str, thumb: bool) -> Re
     }
 
     let key = if thumb { thumb_key(id) } else { id.to_string() };
+    let content_type = if thumb {
+        "image/jpeg".to_string()
+    } else {
+        att.content_type.clone()
+    };
+    let cache = "private, max-age=31536000, immutable".to_string();
+
+    // A range request (video seeking) → 206 with just the requested slice. Thumbs
+    // are small images, always served whole.
+    if !thumb {
+        let storage = state.storage.clone();
+        let key2 = key.clone();
+        let total = match tokio::task::spawn_blocking(move || storage.size(&key2)).await {
+            Ok(Ok(Some(n))) => n,
+            Ok(Ok(None)) => return StatusCode::NOT_FOUND.into_response(),
+            _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        };
+        if let Some((start, end)) = range.as_deref().and_then(|r| parse_range(r, total)) {
+            let len = end - start + 1;
+            let storage = state.storage.clone();
+            let key2 = key.clone();
+            let bytes =
+                match tokio::task::spawn_blocking(move || storage.read_range(&key2, start, len))
+                    .await
+                {
+                    Ok(Ok(Some(b))) => b,
+                    _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+                };
+            return (
+                StatusCode::PARTIAL_CONTENT,
+                [
+                    (header::CONTENT_TYPE, content_type),
+                    (header::ACCEPT_RANGES, "bytes".to_string()),
+                    (header::CONTENT_RANGE, format!("bytes {start}-{end}/{total}")),
+                    (header::CACHE_CONTROL, cache),
+                ],
+                bytes,
+            )
+                .into_response();
+        }
+    }
+
     let storage = state.storage.clone();
     let bytes = match tokio::task::spawn_blocking(move || storage.get(&key)).await {
         Ok(Ok(Some(b))) => b,
         Ok(Ok(None)) => return StatusCode::NOT_FOUND.into_response(),
         _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-
-    let content_type = if thumb {
-        "image/jpeg".to_string()
-    } else {
-        att.content_type.clone()
-    };
     let disposition = format!("inline; filename=\"{}\"", header_safe(&att.filename));
     (
         [
             (header::CONTENT_TYPE, content_type),
-            (
-                header::CACHE_CONTROL,
-                "private, max-age=31536000, immutable".to_string(),
-            ),
+            (header::ACCEPT_RANGES, "bytes".to_string()),
+            (header::CACHE_CONTROL, cache),
             (header::CONTENT_DISPOSITION, disposition),
         ],
         bytes,

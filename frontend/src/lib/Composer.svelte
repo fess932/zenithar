@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { t } from "./i18n";
-  import { send, sendSticker, uploadFile, notify, replyingTo, editing, editMessage, MAX_UPLOAD_BYTES, type Attachment } from "./chat";
+  import { send, sendSticker, uploadFile, notify, replyingTo, editing, editMessage, uploadLimit, type Attachment } from "./chat";
   import { EMOJI } from "./emoji";
   import { getMicStream } from "./mic";
   import { fmtDur } from "./util/format";
@@ -138,7 +138,7 @@
       notify($t("errTooMany"));
       return;
     }
-    if (file.size > MAX_UPLOAD_BYTES) {
+    if (file.size > uploadLimit(file)) {
       notify($t("errTooBig"));
       return;
     }

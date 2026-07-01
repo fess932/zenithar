@@ -23,9 +23,13 @@ export interface ReplyPreview {
 
 // One emoji's reactions on a message: the principal ids who reacted. count =
 // by.length; it's "mine" when my id is in `by`.
+export interface Reactor {
+  id: string;
+  avatar: string | null;
+}
 export interface Reaction {
   emoji: string;
-  by: string[];
+  by: Reactor[];
 }
 
 export interface ChatMessage {
@@ -93,6 +97,8 @@ type Frame =
   | { type: "message-deleted"; id: string; room_id: string }
   | { type: "message-reaction"; id: string; room_id: string; reactions: Reaction[] }
   | { type: "reaction-notice"; room_id: string; message_id: string; emoji: string; from_name: string }
+  | { type: "read"; room_id: string; principal_id: string; at: number }
+  | { type: "read-state"; room_id: string; others_read_at: number }
   | { type: "rooms-changed" }
   | { type: string; [k: string]: unknown };
 
@@ -201,6 +207,15 @@ export function toggleReaction(id: string, emoji: string): void {
 /// Counts even for muted rooms — muting only silences sound/popups, see notify.ts.
 export const unread = writable<Record<string, number>>({});
 
+/// Read receipts: per room, the newest timestamp OTHERS have read to. Your own
+/// message is "read" (✓✓) once this ≥ its `created_at`, else just delivered (✓).
+export const readAt = writable<Record<string, number>>({});
+
+/// Tell the server we've read `room` up to `at` (its latest message's time).
+export function sendRead(room: string, at: number): void {
+  sendFrame({ type: "read", room_id: room, at });
+}
+
 function clearUnread(room_id: string): void {
   unread.update((u) => {
     if (!(room_id in u)) return u;
@@ -278,11 +293,19 @@ export function connect(): void {
       const msgs = (f as { messages: ChatMessage[] }).messages;
       messages.set(msgs);
       hasMoreHistory.set(msgs.length >= HISTORY_PAGE); // a full page → maybe more
+      if (msgs.length) sendRead(room, msgs[msgs.length - 1].created_at); // read receipt
     } else if (f.type === "message") {
       const msg = (f as { message: ChatMessage }).message;
       if (msg.room_id !== get(activeRoom)) return; // not the open room
       messages.update((all) => [...all, msg]);
+      sendRead(msg.room_id, msg.created_at); // we're viewing it → mark read
       incomingHandler?.(msg);
+    } else if (f.type === "read") {
+      const e = f as { room_id: string; at: number }; // always someone else (server excludes us)
+      readAt.update((r) => ({ ...r, [e.room_id]: Math.max(r[e.room_id] ?? 0, e.at) }));
+    } else if (f.type === "read-state") {
+      const e = f as { room_id: string; others_read_at: number };
+      readAt.update((r) => ({ ...r, [e.room_id]: Math.max(r[e.room_id] ?? 0, e.others_read_at) }));
     } else if (f.type === "message-edited") {
       const e = f as { id: string; body: string; edited_at: number };
       messages.update((all) =>
@@ -420,9 +443,12 @@ export function sendSticker(id: string): boolean {
   return true;
 }
 
-/// Per-upload size ceiling — mirrors the backend's `MAX_UPLOAD_BYTES` so the UI
-/// can reject an oversized file up front instead of waiting for a 413.
+/// Per-upload size ceilings — mirror the backend so the UI rejects oversized files
+/// up front instead of waiting for a 413. Videos get 200 MB, everything else 40 MB.
 export const MAX_UPLOAD_BYTES = 40 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+export const uploadLimit = (file: File): number =>
+  file.type.startsWith("video/") ? MAX_VIDEO_BYTES : MAX_UPLOAD_BYTES;
 
 /// Upload a file/image/voice clip to the active room; returns its metadata.
 export async function uploadFile(file: File): Promise<Attachment | null> {

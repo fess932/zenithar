@@ -41,13 +41,21 @@ pub struct ReplyPreview {
     pub has_attachment: bool,
 }
 
-/// Reactions for one emoji on a message: the principal ids who reacted. The
-/// client derives the count (`by.len()`) and highlights it when its own id is in
-/// `by`. Grouped per emoji and embedded in [`ChatMessage`].
+/// Someone who reacted — id + their avatar, so the UI can show reactor faces
+/// (not just a count).
+#[derive(Clone, Debug, Serialize)]
+pub struct Reactor {
+    pub id: String,
+    pub avatar: Option<String>,
+}
+
+/// Reactions for one emoji on a message: who reacted. The client derives the
+/// count (`by.len()`), renders reactor avatars, and highlights it when its own id
+/// is in `by`. Grouped per emoji and embedded in [`ChatMessage`].
 #[derive(Clone, Debug, Serialize)]
 pub struct Reaction {
     pub emoji: String,
-    pub by: Vec<String>,
+    pub by: Vec<Reactor>,
 }
 
 /// A persisted / broadcast chat message. Attachments (0–5) and reactions are
@@ -151,6 +159,8 @@ pub enum Inbound {
     Delete { id: String },
     /// Toggle one emoji reaction on a message (anyone in the room).
     React { id: String, emoji: String },
+    /// Read receipt: the sender has read `room_id` up to timestamp `at`.
+    Read { room_id: String, at: i64 },
     /// Start (or join) the call in a room. The server replies with `call-offer`.
     CallStart { room_id: String },
     /// SDP answer to the server's offer (the server is always the offerer).
@@ -230,6 +240,15 @@ pub enum Outbound {
         emoji: String,
         from_name: String,
     },
+    /// A principal advanced their read pointer in a room → live ✓✓ for authors.
+    Read {
+        room_id: String,
+        principal_id: String,
+        at: i64,
+    },
+    /// Snapshot on join: the newest timestamp OTHERS have read to in this room, so
+    /// existing sent messages render ✓/✓✓ correctly on load.
+    ReadState { room_id: String, others_read_at: i64 },
     /// The caller's room list changed (e.g. someone opened a DM with them) —
     /// refetch `/api/rooms`. Sent targeted at the affected principal.
     RoomsChanged,

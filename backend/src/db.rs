@@ -6,7 +6,9 @@ use sqlx::SqlitePool;
 
 use ulid::Ulid;
 
-use crate::models::{Attachment, ChatMessage, Reaction, ReplyPreview, RoomSummary, SavedItem};
+use crate::models::{
+    Attachment, ChatMessage, Reaction, Reactor, ReplyPreview, RoomSummary, SavedItem,
+};
 
 /// The single-writer pool (max 1 connection). SQLite serialises writes, so we
 /// funnel all of them through one connection — that's what lets the writer task
@@ -191,20 +193,23 @@ pub async fn messages_before(
     // Reactions for the same messages, grouped per message → per emoji (in the
     // order they were first added). `placeholders` is the same ?n list as above.
     let react_sql = format!(
-        "SELECT message_id, emoji, principal_id FROM reactions
-         WHERE message_id IN ({placeholders}) ORDER BY created_at ASC, principal_id ASC"
+        "SELECT r.message_id, r.emoji, r.principal_id, p.avatar
+         FROM reactions r JOIN principals p ON p.id = r.principal_id
+         WHERE r.message_id IN ({placeholders}) ORDER BY r.created_at ASC, r.principal_id ASC"
     );
-    let mut rq = sqlx::query_as::<_, (String, String, String)>(sqlx::AssertSqlSafe(react_sql));
+    let mut rq =
+        sqlx::query_as::<_, (String, String, String, Option<String>)>(sqlx::AssertSqlSafe(react_sql));
     for id in &ids {
         rq = rq.bind(*id);
     }
     let mut react_by_msg: std::collections::HashMap<String, Vec<Reaction>> =
         std::collections::HashMap::new();
-    for (mid, emoji, pid) in rq.fetch_all(pool).await? {
+    for (mid, emoji, pid, avatar) in rq.fetch_all(pool).await? {
+        let reactor = Reactor { id: pid, avatar };
         let list = react_by_msg.entry(mid).or_default();
         match list.iter_mut().find(|r| r.emoji == emoji) {
-            Some(r) => r.by.push(pid),
-            None => list.push(Reaction { emoji, by: vec![pid] }),
+            Some(r) => r.by.push(reactor),
+            None => list.push(Reaction { emoji, by: vec![reactor] }),
         }
     }
 
@@ -309,16 +314,20 @@ pub async fn toggle_reaction(
 /// All reactions on one message, grouped per emoji (first-added order). Used to
 /// broadcast the fresh set after a toggle.
 pub async fn reactions_for_message(reads: &SqlitePool, message_id: &str) -> sqlx::Result<Vec<Reaction>> {
-    let rows: Vec<(String, String)> =
-        sqlx::query_as("SELECT emoji, principal_id FROM reactions WHERE message_id = ?1 ORDER BY created_at ASC, principal_id ASC")
-            .bind(message_id)
-            .fetch_all(reads)
-            .await?;
+    let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(
+        "SELECT r.emoji, r.principal_id, p.avatar FROM reactions r
+         JOIN principals p ON p.id = r.principal_id
+         WHERE r.message_id = ?1 ORDER BY r.created_at ASC, r.principal_id ASC",
+    )
+    .bind(message_id)
+    .fetch_all(reads)
+    .await?;
     let mut out: Vec<Reaction> = Vec::new();
-    for (emoji, pid) in rows {
+    for (emoji, pid, avatar) in rows {
+        let reactor = Reactor { id: pid, avatar };
         match out.iter_mut().find(|r| r.emoji == emoji) {
-            Some(r) => r.by.push(pid),
-            None => out.push(Reaction { emoji, by: vec![pid] }),
+            Some(r) => r.by.push(reactor),
+            None => out.push(Reaction { emoji, by: vec![reactor] }),
         }
     }
     Ok(out)
@@ -798,6 +807,23 @@ pub async fn mark_read(
     .execute(write)
     .await?;
     Ok(())
+}
+
+/// Newest timestamp anyone OTHER than `principal_id` has read to in `room_id` (0
+/// if none). Drives read receipts: your message is "read" once this ≥ its time.
+pub async fn others_read_at(
+    reads: &SqlitePool,
+    room_id: &str,
+    principal_id: &str,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar(
+        "SELECT COALESCE(MAX(last_read_at), 0) FROM room_reads
+         WHERE room_id = ?1 AND principal_id <> ?2",
+    )
+    .bind(room_id)
+    .bind(principal_id)
+    .fetch_one(reads)
+    .await
 }
 
 /// Whether a principal has any read mark yet — false only on their first ever

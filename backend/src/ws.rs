@@ -51,7 +51,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
     let (mut sender, mut receiver) = socket.split();
 
     // Initial transcript for the default room.
-    if send_history(&mut sender, &state, &active_room)
+    if send_history(&mut sender, &state, &active_room, &principal.id)
         .await
         .is_err()
     {
@@ -169,7 +169,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                         // Opening a room (e.g. a DM we just started) adds it to the
                         // accessible set, so its unread bumps reach us afterwards.
                         accessible.insert(active_room.clone());
-                        if send_history(&mut sender, &state, &active_room).await.is_err() {
+                        if send_history(&mut sender, &state, &active_room, &principal.id).await.is_err() {
                             break;
                         }
                         let _ = db::mark_read(&state.db, &principal.id, &active_room, now).await;
@@ -361,6 +361,32 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                             }
                             _ => debug!(msg = %id, "react: message gone"),
                         }
+                    }
+                    Inbound::Read { room_id, at } => {
+                        if at <= 0 {
+                            continue;
+                        }
+                        // Only for the room this socket is actually in.
+                        let allowed = match &client_room {
+                            Some(r) => room_id == *r,
+                            None => room_id == active_room,
+                        };
+                        if !allowed {
+                            continue;
+                        }
+                        let _ = db::mark_read(&state.db, &principal.id, &room_id, at).await;
+                        // Tell the room (minus self) so authors get live ✓✓.
+                        let _ = state.signal.send(Signal {
+                            room_id: room_id.clone(),
+                            target: None,
+                            exclude: Some(principal.id.clone()),
+                            all_employees: false,
+                            frame: Outbound::Read {
+                                room_id,
+                                principal_id: principal.id.clone(),
+                                at,
+                            },
+                        });
                     }
                     Inbound::CallStart { room_id } => {
                         if !call_access(&state, &principal, &client_room, &room_id).await {
@@ -557,6 +583,7 @@ async fn send_history(
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     state: &AppState,
     room_id: &str,
+    principal_id: &str,
 ) -> Result<(), ()> {
     let messages = match db::recent_messages(&state.reads, room_id, HISTORY_ON_CONNECT).await {
         Ok(m) => m,
@@ -573,5 +600,19 @@ async fn send_history(
     sender
         .send(Message::Text(json.into()))
         .await
-        .map_err(|_| ())
+        .map_err(|_| ())?;
+
+    // Read-receipt snapshot: how far OTHERS have read this room, so the client can
+    // render ✓/✓✓ on the history it just received.
+    let others_read_at = db::others_read_at(&state.reads, room_id, principal_id)
+        .await
+        .unwrap_or(0);
+    let snap = Outbound::ReadState {
+        room_id: room_id.to_string(),
+        others_read_at,
+    };
+    if let Ok(json) = serde_json::to_string(&snap) {
+        let _ = sender.send(Message::Text(json.into())).await;
+    }
+    Ok(())
 }
