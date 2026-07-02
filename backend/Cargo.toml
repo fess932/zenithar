@@ -26,6 +26,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 getrandom = "0.2"
+# statvfs() for the admin dashboard's free-disk-space figure (unix only).
+libc = "0.2"
 sha2 = "0.10"
 base64 = "0.22"
 time = "0.3"

@@ -790,6 +790,16 @@ pub async fn list_recorded_calls(reads: &SqlitePool) -> sqlx::Result<Vec<Recorde
     .await
 }
 
+/// Clear a call's recording flag so it drops off the admin recordings list
+/// (the on-disk audio files are removed separately).
+pub async fn clear_recording(write: &SqlitePool, call_id: &str) -> sqlx::Result<()> {
+    sqlx::query("UPDATE calls SET recording_id = NULL WHERE id = ?1")
+        .bind(call_id)
+        .execute(write)
+        .await
+        .map(|_| ())
+}
+
 /// Mark a room read for a principal up to `ts`; never moves the mark backward.
 pub async fn mark_read(
     write: &SqlitePool,

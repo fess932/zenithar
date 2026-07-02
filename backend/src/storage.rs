@@ -29,6 +29,15 @@ pub trait Storage: Send + Sync {
             v[s..e].to_vec()
         }))
     }
+
+    /// Total bytes occupied by all blobs (originals + thumbnails + any orphans),
+    /// or None if the backend can't cheaply enumerate. Used by the admin stats
+    /// dashboard to report real disk usage (SUM(size) in the DB undercounts —
+    /// it excludes thumbnails and upload orphans). Backends that can't walk their
+    /// store return None and the dashboard falls back to the DB figure.
+    fn disk_usage(&self) -> io::Result<Option<u64>> {
+        Ok(None)
+    }
 }
 
 /// Files under a single directory. The key is the file name; we reject anything
@@ -107,6 +116,19 @@ impl Storage for DiskStorage {
         }
         buf.truncate(read);
         Ok(Some(buf))
+    }
+
+    fn disk_usage(&self) -> io::Result<Option<u64>> {
+        let mut total = 0u64;
+        for entry in std::fs::read_dir(&self.root)? {
+            let entry = entry?;
+            if let Ok(m) = entry.metadata() {
+                if m.is_file() {
+                    total += m.len();
+                }
+            }
+        }
+        Ok(Some(total))
     }
 }
 

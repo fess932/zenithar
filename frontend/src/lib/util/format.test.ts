@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { fmtSize, fmtDur } from "./format";
+import { fmtSize, fmtBytes, fmtDur } from "./format";
 
 describe("fmtSize", () => {
   test("bytes below 1 KB", () => expect(fmtSize(512)).toBe("512 B"));
@@ -7,6 +7,16 @@ describe("fmtSize", () => {
   test("1024 becomes 1 KB", () => expect(fmtSize(1024)).toBe("1 KB"));
   test("KB rounds to a whole number", () => expect(fmtSize(3072)).toBe("3 KB"));
   test("MB keeps one decimal", () => expect(fmtSize(1.5 * 1024 * 1024)).toBe("1.5 MB"));
+});
+
+describe("fmtBytes", () => {
+  test("bytes", () => expect(fmtBytes(512)).toBe("512 B"));
+  test("KB whole", () => expect(fmtBytes(3072)).toBe("3 KB"));
+  test("MB one decimal", () => expect(fmtBytes(1.5 * 1024 * 1024)).toBe("1.5 MB"));
+  test("GB one decimal", () => expect(fmtBytes(2 * 1024 ** 3)).toBe("2.0 GB"));
+  test("TB one decimal", () => expect(fmtBytes(3 * 1024 ** 4)).toBe("3.0 TB"));
+  test("negatives clamp to zero", () => expect(fmtBytes(-5)).toBe("0 B"));
+  test("zero", () => expect(fmtBytes(0)).toBe("0 B"));
 });
 
 describe("fmtDur", () => {

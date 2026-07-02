@@ -114,6 +114,40 @@ pub async fn serve(
         .into_response()
 }
 
+/// `DELETE /api/admin/recordings/{call_id}` — remove all audio files for the call
+/// (mixed + per-track) from disk and clear the DB flag so it leaves the list.
+pub async fn delete(
+    State(state): State<AppState>,
+    _admin: Admin,
+    AxPath(call_id): AxPath<String>,
+) -> Response {
+    if !is_id(&call_id) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let dir = state.recordings_dir.clone();
+    let cid = call_id.clone();
+    let _ = tokio::task::spawn_blocking(move || remove_call_files(&dir, &cid)).await;
+    // Best-effort DB flag clear; the files are already gone either way.
+    let _ = db::clear_recording(&state.db, &call_id).await;
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// Delete every `<call_id>.*.ogg` file in the recordings dir. `call_id` is a
+/// dot-free ULID, so the `<call_id>.` prefix matches only this call's files.
+fn remove_call_files(dir: &Path, call_id: &str) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let prefix = format!("{call_id}.");
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if name.starts_with(&prefix) && name.ends_with(".ogg") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// What's on disk for a call: the mixed file and/or the per-participant tracks.
 #[derive(Default)]
 struct CallFiles {

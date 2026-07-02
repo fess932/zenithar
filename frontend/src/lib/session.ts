@@ -211,6 +211,15 @@ export async function listRecordings(): Promise<Recording[]> {
   return r.ok ? ((await r.json()) as Recording[]) : [];
 }
 
+export async function deleteRecording(callId: string): Promise<boolean> {
+  try {
+    const r = await fetch(`/api/admin/recordings/${callId}`, { method: "DELETE" });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
 // ---- telemetry dashboard ---------------------------------------------------
 
 export interface TelemetryInfo {
@@ -245,5 +254,44 @@ export async function getTelemetry(): Promise<TelemetryInfo> {
     return r.ok ? ((await r.json()) as TelemetryInfo) : { enabled: false, port: 4000 };
   } catch {
     return { enabled: false, port: 4000 };
+  }
+}
+
+// ---- usage statistics (admin dashboard) ------------------------------------
+
+export interface MediaStats {
+  count: number;
+  bytes: number;
+  image_bytes: number;
+  video_bytes: number;
+  audio_bytes: number;
+  other_bytes: number;
+}
+
+export interface UsageStats {
+  generated_at: number;
+  principals: { total: number; users: number; clients: number; bots: number; admins: number };
+  rooms: { total: number; common: number; client: number; direct: number };
+  messages: { total: number; last_24h: number; last_7d: number };
+  reactions: number;
+  calls: { total: number; recorded: number };
+  recordings: { count: number; bytes: number };
+  attachments: MediaStats;
+  saved: MediaStats;
+  storage: {
+    db_bytes: number;
+    blobs_bytes: number | null;
+    fs_total: number | null;
+    fs_avail: number | null;
+  };
+  memory: { rss_bytes: number } | null;
+}
+
+export async function getStats(): Promise<UsageStats | null> {
+  try {
+    const r = await fetch("/api/admin/stats");
+    return r.ok ? ((await r.json()) as UsageStats) : null;
+  } catch {
+    return null;
   }
 }

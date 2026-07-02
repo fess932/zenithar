@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { t } from "./i18n";
   import VoicePlayer from "./VoicePlayer.svelte";
+  import Stats from "./Stats.svelte";
   import {
     listPrincipals,
     createPrincipal,
@@ -12,6 +13,7 @@
     rotateIntegration,
     revokeIntegration,
     listRecordings,
+    deleteRecording,
     getTelemetry,
     type PrincipalSummary,
     type IntegrationSummary,
@@ -93,6 +95,11 @@
     return t === null ? never : new Date(t).toLocaleString();
   }
 
+  async function removeRecording(callId: string): Promise<void> {
+    if (!confirm($t("deleteRecordingConfirm"))) return;
+    if (await deleteRecording(callId)) await refresh();
+  }
+
   function fullUrl(path: string): string {
     return location.origin + path;
   }
@@ -148,6 +155,9 @@
   </header>
 
   <main class="overflow-y-auto px-3 py-4 sm:px-5">
+    <!-- usage dashboard -->
+    <Stats />
+
     <!-- create -->
     <section class="mb-6 max-w-2xl">
       <h2 class="mb-2 text-[0.8rem] font-semibold uppercase tracking-[0.08em] text-muted">
@@ -347,6 +357,13 @@
                     · {$t("startedBy")}: {rec.started_by_name}
                   </span>
                 {/if}
+                <button
+                  type="button"
+                  onclick={() => removeRecording(rec.call_id)}
+                  class="ml-auto inline-flex min-h-8 cursor-pointer items-center rounded-md px-2 font-mono text-[0.7rem] text-muted hover:bg-surface hover:text-bad"
+                >
+                  {$t("delete")}
+                </button>
               </div>
               <div class="flex flex-col gap-2">
                 {#each rec.tracks as tr (tr.participant_id)}

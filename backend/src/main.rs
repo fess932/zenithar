@@ -5,7 +5,7 @@ use anyhow::Result;
 use axum::extract::DefaultBodyLimit;
 use axum::http::{header, HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get, patch, post};
+use axum::routing::{any, delete, get, patch, post};
 use axum::Router;
 use tokio::sync::broadcast;
 use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Predicate};
@@ -29,6 +29,7 @@ mod routes;
 mod saved;
 mod send;
 mod state;
+mod stats;
 mod storage;
 mod telemetry;
 mod uploads;
@@ -432,9 +433,14 @@ async fn main() -> Result<()> {
             "/api/integrations/{id}/revoke",
             post(routes::revoke_integration),
         )
-        // Admin: telemetry dashboard link + saved call recordings.
+        // Admin: usage dashboard + telemetry dashboard link + saved call recordings.
+        .route("/api/admin/stats", get(stats::stats))
         .route("/api/admin/telemetry", get(routes::telemetry_info))
         .route("/api/admin/recordings", get(recordings::list))
+        .route(
+            "/api/admin/recordings/{call_id}",
+            delete(recordings::delete),
+        )
         .route(
             "/api/admin/recordings/{call_id}/{participant_id}",
             get(recordings::serve),
