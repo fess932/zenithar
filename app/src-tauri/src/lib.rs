@@ -143,6 +143,38 @@ fn load_host(app: tauri::AppHandle) -> Option<String> {
     (!host.is_empty()).then_some(host)
 }
 
+/// The web app runs from the user's OWN host — a REMOTE https origin. WKWebView
+/// blocks Tauri's `ipc://` custom protocol from such a page as mixed content, so
+/// IPC (invoke) doesn't reach native. Instead the web app triggers native actions
+/// by NAVIGATING to sentinel paths, which this plugin's on_navigation hook
+/// intercepts and CANCELS (returns false). on_navigation is a plugin-level hook,
+/// so unlike WebviewWindowBuilder::on_navigation it also works for the config
+/// window on mobile.
+fn native_bridge<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    use tauri_plugin_opener::OpenerExt;
+    tauri::plugin::Builder::new("zenithar-bridge")
+        .on_navigation(|webview, url| {
+            match url.path() {
+                // Tapped a link in a message → open it in the system browser.
+                "/__zenithar_open__" => {
+                    if let Some((_, target)) = url.query_pairs().find(|(k, _)| k == "u") {
+                        // Only hand real web links to the browser (never file://, etc.).
+                        if Url::parse(&target).is_ok_and(|u| matches!(u.scheme(), "http" | "https"))
+                        {
+                            let _ = webview
+                                .app_handle()
+                                .opener()
+                                .open_url(target.into_owned(), None::<&str>);
+                        }
+                    }
+                    false
+                }
+                _ => true,
+            }
+        })
+        .build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "android")]
@@ -166,6 +198,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_opener::init())
+        .plugin(native_bridge())
         .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![pending_login, go, save_host, load_host])
         .setup(|app| {

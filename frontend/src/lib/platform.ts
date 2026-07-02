@@ -7,24 +7,24 @@ export const isApp: boolean =
   // Tauri v2 injects __TAURI_INTERNALS__; __TAURI__ appears with globalTauri on.
   ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
 
-// The Tauri webview swallows plain <a target="_blank"> clicks (Android does
-// nothing, desktop may not reach the system browser), so external links are
-// routed through the opener plugin instead. We reach it via the internals-invoke
-// global the webview injects — no static @tauri-apps import, so the web build
-// stays Tauri-free. In a plain browser this just falls back to window.open.
-type Invoke = (cmd: string, args?: unknown) => Promise<unknown>;
+// Opening links from inside the app can't go through Tauri IPC: the chat runs on
+// the user's REMOTE https host, and WKWebView blocks Tauri's ipc:// custom
+// protocol from a secure page as mixed content (invoke never reaches native). So
+// instead the app NAVIGATES to a sentinel path; the native shell's on_navigation
+// hook intercepts it, opens the URL in the system browser, and cancels the
+// navigation. No IPC, no @tauri-apps import — the web build stays Tauri-free.
+// In a plain browser (isApp false) we just use window.open as before.
+function nativeBridge(path: string, params?: Record<string, string>): void {
+  const q = params ? "?" + new URLSearchParams(params).toString() : "";
+  // Cancelled natively before commit; if an old build lacks the hook, the server's
+  // SPA fallback serves index.html (a reload) rather than breaking the page.
+  window.location.href = path + q;
+}
 
 export function openExternal(url: string): void {
   if (isApp) {
-    const invoke = (window as unknown as { __TAURI_INTERNALS__?: { invoke?: Invoke } })
-      .__TAURI_INTERNALS__?.invoke;
-    if (invoke) {
-      // plugin:opener|open_url → system browser. Fall back if the plugin is absent.
-      void invoke("plugin:opener|open_url", { url }).catch(() => {
-        window.open(url, "_blank", "noopener,noreferrer");
-      });
-      return;
-    }
+    nativeBridge("/__zenithar_open__", { u: url });
+    return;
   }
   window.open(url, "_blank", "noopener,noreferrer");
 }

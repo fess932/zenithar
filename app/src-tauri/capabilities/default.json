@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Baseline capability for the Zenithar shell window (LOCAL landing origin). Grants core defaults, deep-link, and opener open-url. Remote chat pages get open-url via the separate remote-opener capability.",
+  "description": "Baseline capability for the Zenithar shell window. External links + browser-open are handled natively via the on_navigation bridge (no frontend IPC), so only core + deep-link are granted here.",
   "windows": ["main"],
-  "permissions": ["core:default", "deep-link:default", "opener:allow-open-url"]
+  "permissions": ["core:default", "deep-link:default"]
 }
