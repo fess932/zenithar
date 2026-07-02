@@ -151,6 +151,7 @@ fn load_host(app: tauri::AppHandle) -> Option<String> {
 /// so unlike WebviewWindowBuilder::on_navigation it also works for the config
 /// window on mobile.
 fn native_bridge<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    use tauri::Manager;
     use tauri_plugin_opener::OpenerExt;
     tauri::plugin::Builder::new("zenithar-bridge")
         .on_navigation(|webview, url| {
@@ -161,10 +162,15 @@ fn native_bridge<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
                         // Only hand real web links to the browser (never file://, etc.).
                         if Url::parse(&target).is_ok_and(|u| matches!(u.scheme(), "http" | "https"))
                         {
-                            let _ = webview
-                                .app_handle()
-                                .opener()
-                                .open_url(target.into_owned(), None::<&str>);
+                            // Launch OFF the navigation callback. On Android this hook is
+                            // the WebView's shouldOverrideUrlLoading; firing an Intent from
+                            // inside it crashes, so hop to the main thread and open there.
+                            let app = webview.app_handle().clone();
+                            let app_for_open = app.clone();
+                            let target = target.into_owned();
+                            let _ = app.run_on_main_thread(move || {
+                                let _ = app_for_open.opener().open_url(target, None::<&str>);
+                            });
                         }
                     }
                     false
