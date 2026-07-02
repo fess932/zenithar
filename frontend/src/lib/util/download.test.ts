@@ -27,6 +27,14 @@ describe("pickAsset", () => {
     expect(pickAsset("windows", assets.filter((a) => !/\.exe$/.test(a.name)))).toBe("u/msi"));
   test("macOS → .dmg", () => expect(pickAsset("mac", assets)).toBe("u/dmg"));
   test("Android → .apk", () => expect(pickAsset("android", assets)).toBe("u/apk"));
+  test("Android prefers arm64 among several APKs", () =>
+    expect(
+      pickAsset("android", [
+        { name: "app-universal-release.apk", browser_download_url: "u/univ" },
+        { name: "app-x86_64-release.apk", browser_download_url: "u/x64" },
+        { name: "app-arm64-release.apk", browser_download_url: "u/arm64" },
+      ]),
+    ).toBe("u/arm64"));
   test("no matching asset → undefined (caller uses releases page)", () =>
     expect(pickAsset("mac", [assets[3]])).toBeUndefined());
   test("other → undefined", () => expect(pickAsset("other", assets)).toBeUndefined());

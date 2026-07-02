@@ -37,7 +37,9 @@ export function pickAsset(os: OS, assets: ReleaseAsset[]): string | undefined {
   const by = (re: RegExp) => assets.find((a) => re.test(a.name))?.browser_download_url;
   switch (os) {
     case "android":
-      return by(/\.apk$/i);
+      // A release ships several APKs (arm64 / x86_64 / universal). Real phones
+      // are arm64, so prefer app-arm64-release.apk; fall back to any .apk.
+      return by(/arm64.*\.apk$/i) ?? by(/aarch64.*\.apk$/i) ?? by(/\.apk$/i);
     case "windows":
       return by(/setup\.exe$/i) ?? by(/\.exe$/i) ?? by(/\.msi$/i);
     case "mac":

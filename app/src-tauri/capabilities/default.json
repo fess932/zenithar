@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Baseline capability for the Zenithar shell window. The web app doesn't use Tauri IPC, so only core defaults are granted.",
+  "description": "Baseline capability for the Zenithar shell window (LOCAL landing origin). Grants core defaults, deep-link, and opener open-url. Remote chat pages get open-url via the separate remote-opener capability.",
   "windows": ["main"],
   "permissions": ["core:default", "deep-link:default", "opener:allow-open-url"]
 }
