@@ -10,6 +10,7 @@
   import { openMessageMenu } from "./messageMenu";
   import { openProfile } from "./profile";
   import { linkify } from "./util/linkify";
+  import { openExternal } from "./platform";
   import { fmtSize } from "./util/format";
   import { fmtTime, fullTime } from "./util/time";
 
@@ -105,6 +106,14 @@
               target="_blank"
               rel="noopener noreferrer"
               class="text-beacon underline underline-offset-2 hover:brightness-110"
+              onclick={(e) => {
+                // The app webview swallows target=_blank; hand the URL to the
+                // system browser. stopPropagation so tapping a link doesn't also
+                // trigger the row's context-menu handler.
+                e.preventDefault();
+                e.stopPropagation();
+                openExternal(part.href!);
+              }}
               >{part.text}</a
             >{:else}{part.text}{/if}{/each}</span
       >{/if}

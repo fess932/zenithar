@@ -27,6 +27,9 @@ log = "0.4"
 # deep-link feature) routes a link from a 2nd launch to the running app on Win/Linux.
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+# Hand external URLs (links tapped in a message) to the system browser. The web
+# webview swallows target=_blank, so links are opened via this plugin instead.
+tauri-plugin-opener = "2"
 
 # App logs → Android logcat (tag `zenithar`); stderr on desktop.
 [target.'cfg(target_os = "android")'.dependencies]

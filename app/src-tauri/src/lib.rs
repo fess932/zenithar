@@ -165,6 +165,7 @@ pub fn run() {
     }));
 
     builder
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![pending_login, go, save_host, load_host])
         .setup(|app| {
