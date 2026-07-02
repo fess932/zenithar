@@ -131,6 +131,7 @@ app-android: fe-build app-icons ## Build the Android debug .apk (arm64 only — 
 	echo "→ JAVA_HOME=$$JH"; echo "→ ANDROID_HOME=$$SDK"; echo "→ NDK_HOME=$$NDK"; \
 	cd $(APP) && \
 	  JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" bun run tauri android init && \
+	  bun run tauri icon app-icon.png && \
 	  perl -pi -e 's/compileSdk\s*=\s*\d+/compileSdk = 36/; s/targetSdk\s*=\s*\d+/targetSdk = 36/' src-tauri/gen/android/app/build.gradle.kts && \
 	  bash platforms/android/patch.sh && \
 	  RUSTFLAGS="-C strip=debuginfo" JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" \
@@ -162,6 +163,7 @@ app-android-release: fe-build app-icons ## Signed RELEASE .apk — reads ANDROID
 	echo "→ signed release with $$KS (alias $$ALIAS)"; \
 	cd $(APP) && \
 	  JAVA_HOME="$$JH" ANDROID_HOME="$$SDK" NDK_HOME="$$NDK" bun run tauri android init && \
+	  bun run tauri icon app-icon.png && \
 	  perl -pi -e 's/compileSdk\s*=\s*\d+/compileSdk = 36/; s/targetSdk\s*=\s*\d+/targetSdk = 36/' src-tauri/gen/android/app/build.gradle.kts && \
 	  bash platforms/android/patch.sh && \
 	  rm -rf src-tauri/gen/android/app/build/outputs/apk && \

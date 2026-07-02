@@ -418,3 +418,83 @@ fn sanitize_content_type(ct: Option<String>) -> String {
     })
     .unwrap_or_else(|| "application/octet-stream".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        header_safe, parse_range, sanitize_content_type, sanitize_filename, size_limit,
+        MAX_UPLOAD_BYTES, MAX_VIDEO_BYTES,
+    };
+
+    #[test]
+    fn range_basic_and_open_ended() {
+        assert_eq!(parse_range("bytes=0-99", 1000), Some((0, 99)));
+        assert_eq!(parse_range("bytes=100-", 1000), Some((100, 999)));
+        assert_eq!(parse_range("bytes=0-", 1000), Some((0, 999)));
+        assert_eq!(parse_range(" bytes=10-20 ", 1000), Some((10, 20))); // trimmed
+    }
+
+    #[test]
+    fn range_suffix() {
+        assert_eq!(parse_range("bytes=-100", 1000), Some((900, 999)));
+        assert_eq!(parse_range("bytes=-5000", 1000), Some((0, 999))); // longer than blob
+        assert_eq!(parse_range("bytes=-0", 1000), None); // last 0 bytes → invalid
+    }
+
+    #[test]
+    fn range_clamps_end() {
+        assert_eq!(parse_range("bytes=500-5000", 1000), Some((500, 999)));
+        assert_eq!(parse_range("bytes=999-999", 1000), Some((999, 999)));
+    }
+
+    #[test]
+    fn range_rejects_bad() {
+        assert_eq!(parse_range("bytes=2000-3000", 1000), None); // start past the end
+        assert_eq!(parse_range("bytes=abc", 1000), None);
+        assert_eq!(parse_range("bytes=", 1000), None);
+        assert_eq!(parse_range("items=0-1", 1000), None); // wrong unit
+        assert_eq!(parse_range("bytes=0-99", 0), None); // empty blob
+    }
+
+    #[test]
+    fn filename_strips_path_and_dangerous_chars() {
+        assert_eq!(sanitize_filename("../../etc/passwd"), "passwd");
+        assert_eq!(sanitize_filename("a/b\\c.png"), "c.png");
+        assert_eq!(sanitize_filename("a\u{0}b\"c.png"), "abc.png");
+        assert_eq!(sanitize_filename("   "), "file");
+        assert_eq!(sanitize_filename(""), "file");
+    }
+
+    #[test]
+    fn filename_caps_length() {
+        assert_eq!(sanitize_filename(&"x".repeat(500)).len(), 200);
+    }
+
+    #[test]
+    fn header_safe_strips_quotes_backslashes_controls() {
+        // Prevents Content-Disposition header injection.
+        assert_eq!(header_safe("a\"b\\c\nd"), "abcd");
+        assert_eq!(header_safe("clean.png"), "clean.png");
+    }
+
+    #[test]
+    fn content_type_validation() {
+        assert_eq!(sanitize_content_type(Some("image/png".into())), "image/png");
+        assert_eq!(sanitize_content_type(None), "application/octet-stream");
+        assert_eq!(sanitize_content_type(Some(String::new())), "application/octet-stream");
+        // Header injection via CRLF is rejected.
+        assert_eq!(
+            sanitize_content_type(Some("image/png\r\nX: y".into())),
+            "application/octet-stream"
+        );
+        assert_eq!(sanitize_content_type(Some("x".repeat(200))), "application/octet-stream");
+    }
+
+    #[test]
+    fn size_limit_video_vs_other() {
+        assert_eq!(size_limit(&Some("video/mp4".into())), MAX_VIDEO_BYTES);
+        assert_eq!(size_limit(&Some("video/webm".into())), MAX_VIDEO_BYTES);
+        assert_eq!(size_limit(&Some("image/png".into())), MAX_UPLOAD_BYTES);
+        assert_eq!(size_limit(&None), MAX_UPLOAD_BYTES);
+    }
+}

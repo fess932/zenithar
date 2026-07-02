@@ -198,6 +198,19 @@ pub async fn push_unregister(
     }
 }
 
+#[derive(Serialize)]
+pub struct Version {
+    pub commit: &'static str,
+}
+
+/// `GET /api/version` — the running build's short commit hash (public). Lets the
+/// UI flag "a newer version is available" by comparing with the latest on GitHub.
+pub async fn version() -> Json<Version> {
+    Json(Version {
+        commit: env!("ZENITHAR_GIT_SHA"),
+    })
+}
+
 #[derive(Deserialize)]
 pub struct DmReq {
     pub with: String,

@@ -21,6 +21,26 @@ interface LightboxState {
 
 export const lightbox = writable<LightboxState | null>(null);
 
+// History integration: opening the viewer pushes a history entry so the Android
+// back gesture / edge-swipe (and Esc, via UI) closes the viewer and returns to
+// the chat instead of navigating the app underneath. Mirrors the room nav.
+let historyPushed = false;
+if (typeof window !== "undefined") {
+  window.addEventListener("popstate", () => {
+    // Our entry was popped (back gesture) → close, without pushing back again.
+    if (historyPushed && !(history.state && (history.state as { lb?: boolean }).lb)) {
+      historyPushed = false;
+      lightbox.set(null);
+    }
+  });
+}
+function pushHistory(): void {
+  if (typeof history !== "undefined" && !historyPushed) {
+    history.pushState({ lb: true }, "");
+    historyPushed = true;
+  }
+}
+
 const orig = (id: string) => `/api/attachments/${id}`;
 
 /// Open the viewer at the given attachment, with all transcript images and
@@ -42,6 +62,7 @@ export function openLightbox(attachmentId: string): void {
   if (items.length === 0) return;
   const found = items.findIndex((i) => i.id === attachmentId);
   lightbox.set({ items, index: found < 0 ? 0 : found });
+  pushHistory();
 }
 
 /// Open the viewer on an arbitrary gallery (e.g. saved items, an avatar) — not
@@ -49,10 +70,17 @@ export function openLightbox(attachmentId: string): void {
 export function openGallery(items: LightboxItem[], index: number): void {
   if (items.length === 0) return;
   lightbox.set({ items, index: Math.max(0, Math.min(index, items.length - 1)) });
+  pushHistory();
 }
 
 export function closeLightbox(): void {
   lightbox.set(null);
+  // Closed via UI (Esc / ✕ / backdrop) → pop our own history entry to stay in
+  // sync (fires popstate, but the store is already null so it's a no-op).
+  if (historyPushed) {
+    historyPushed = false;
+    if (typeof history !== "undefined") history.back();
+  }
 }
 
 /// Step the gallery; wraps around at the ends.

@@ -10,6 +10,7 @@
     detectOS,
     pickAsset,
     OS_NAME,
+    REPO,
     RELEASES_PAGE,
     RELEASE_API,
     type ReleaseAsset,
@@ -92,6 +93,30 @@
     }
   }
   $: if (menuOpen) void loadDownload();
+
+  // "New version available" hint: compare the running build's commit (/api/version)
+  // with the latest commit on main (GitHub). Checked once when the menu opens.
+  let newVersion = false;
+  let versionChecked = false;
+  async function checkVersion(): Promise<void> {
+    if (versionChecked) return;
+    versionChecked = true;
+    try {
+      const [cur, gh] = await Promise.all([
+        fetch("/api/version").then((r) => (r.ok ? r.json() : null)),
+        fetch(`https://api.github.com/repos/${REPO}/commits?per_page=1`, {
+          headers: { Accept: "application/vnd.github+json" },
+        }).then((r) => (r.ok ? r.json() : null)),
+      ]);
+      const current = (cur as { commit?: string } | null)?.commit;
+      const latest = Array.isArray(gh) ? (gh[0] as { sha?: string } | undefined)?.sha : undefined;
+      // current is a short sha; latest a full one. Skip unknown/dev builds.
+      if (current && current !== "unknown" && latest) newVersion = !latest.startsWith(current);
+    } catch {
+      /* offline / rate-limited — no badge */
+    }
+  }
+  $: if (menuOpen) void checkVersion();
 
   // "What's new": the last commit subjects, pulled lazily from GitHub (open CORS,
   // same source as the download link). Fetched once when the panel first opens.
@@ -379,6 +404,14 @@
         >
           {$t("openInApp")}
         </button>
+      {/if}
+      {#if newVersion}
+        <div
+          class="flex items-center justify-center gap-1.5 rounded-md bg-beacon/10 py-1.5 text-center font-mono text-[0.7rem] tracking-[0.04em] text-beacon"
+        >
+          <span class="text-sm leading-none">🆕</span>
+          {$t("newVersion")}
+        </div>
       {/if}
       <!-- Latest app build for THIS OS (Windows/macOS/Android), resolved from the
            GitHub release; falls back to the releases page. Plain external link so

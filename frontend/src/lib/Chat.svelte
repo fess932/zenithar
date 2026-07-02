@@ -27,6 +27,8 @@
     unread,
     online,
     loadOlder,
+    setViewPinned,
+    resync,
     type RoomSummary,
   } from "./chat";
   import {
@@ -118,6 +120,49 @@
     }
   }
 
+  // Report pinned-to-bottom to the store so it may cap the transcript (dropping
+  // old messages) only while we're at the bottom, never mid-scroll-up.
+  $: setViewPinned(pinned);
+
+  // --- pull-to-refresh (drag UP from the bottom of the transcript) ------------
+  // A chat is pinned to the bottom (newest messages), so the refresh gesture is a
+  // bottom overscroll: at the bottom edge, drag UP past a threshold to bounce the
+  // socket and re-pull the open room's history (recovers a half-dead WS).
+  // loadOlder still handles incremental scroll-up at the top; this is the hard
+  // refresh. `pullDist` is the upward-drag magnitude (content shifts up to reveal
+  // the indicator pinned at the bottom).
+  let pullStart: number | null = null;
+  let pullDist = 0;
+  let refreshing = false;
+  const PULL_THRESHOLD = 60;
+
+  function atBottom(): boolean {
+    return !!logEl && logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight <= 2;
+  }
+  function onTouchStart(e: TouchEvent): void {
+    pullStart = atBottom() ? (e.touches[0]?.clientY ?? null) : null;
+  }
+  function onTouchMove(e: TouchEvent): void {
+    if (pullStart === null || refreshing) return;
+    const dy = (e.touches[0]?.clientY ?? pullStart) - pullStart; // negative when dragging up
+    pullDist = dy < 0 ? Math.min(-dy * 0.5, 80) : 0;
+  }
+  async function onTouchEnd(): Promise<void> {
+    if (pullStart === null) return;
+    pullStart = null;
+    if (pullDist >= PULL_THRESHOLD && !refreshing) {
+      refreshing = true;
+      pullDist = PULL_THRESHOLD; // hold while refreshing
+      resync(); // bounce the socket → server re-sends the open room's history
+      setTimeout(() => {
+        refreshing = false;
+        pullDist = 0;
+      }, 600);
+    } else {
+      pullDist = 0;
+    }
+  }
+
   // Keep pinned to the newest line after each DOM update (not a reactive
   // dependency, so updating scroll can't re-trigger itself).
   afterUpdate(() => {
@@ -186,37 +231,58 @@
         {peer}
       />
 
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <main
       bind:this={logEl}
       onscroll={onScroll}
-      class="overflow-x-hidden overflow-y-auto py-3"
+      ontouchstart={onTouchStart}
+      ontouchmove={onTouchMove}
+      ontouchend={onTouchEnd}
+      class="relative overflow-x-hidden overflow-y-auto overscroll-contain py-3"
       aria-live="polite"
     >
-      {#if $messages.length === 0}
-        <p class="px-6 py-10 font-mono text-[0.82rem] text-muted">{$t("empty")}</p>
-      {:else}
-        {#each $messages as m, i (m.id)}
-          {@const prev = i > 0 ? $messages[i - 1] : null}
-          {@const newDay = !prev || !sameDay(prev.created_at, m.created_at)}
-          {#if newDay}
-            <div class="my-2 flex justify-center">
-              <span
-                class="rounded-full bg-surface-2 px-3 py-0.5 font-mono text-[0.7rem] text-muted"
-              >
-                {dayLabel(m.created_at)}
-              </span>
-            </div>
-          {/if}
-          <!-- Start a new author group on a new day, a new author, or after a
-               5-minute lull — so the name + gap only print once per run. -->
-          {@const firstInGroup =
-            newDay ||
-            !prev ||
-            prev.author_id !== m.author_id ||
-            m.created_at - prev.created_at > 5 * 60 * 1000}
-          <Message {m} {firstInGroup} />
-        {/each}
-      {/if}
+      <!-- pull-to-refresh indicator: pinned at the bottom (drag up reveals it) -->
+      <div
+        class="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-center justify-center overflow-hidden"
+        style:height="{pullDist}px"
+        style:opacity={pullDist > 6 ? 1 : 0}
+      >
+        <span
+          class="text-lg text-muted {refreshing ? 'animate-spin' : ''}"
+          style:transform="rotate({refreshing ? 0 : Math.round(pullDist * 4)}deg)">↻</span
+        >
+      </div>
+
+      <div
+        style:transform="translateY({-pullDist}px)"
+        style:transition={pullStart !== null ? "none" : "transform 0.15s"}
+      >
+        {#if $messages.length === 0}
+          <p class="px-6 py-10 font-mono text-[0.82rem] text-muted">{$t("empty")}</p>
+        {:else}
+          {#each $messages as m, i (m.id)}
+            {@const prev = i > 0 ? $messages[i - 1] : null}
+            {@const newDay = !prev || !sameDay(prev.created_at, m.created_at)}
+            {#if newDay}
+              <div class="my-2 flex justify-center">
+                <span
+                  class="rounded-full bg-surface-2 px-3 py-0.5 font-mono text-[0.7rem] text-muted"
+                >
+                  {dayLabel(m.created_at)}
+                </span>
+              </div>
+            {/if}
+            <!-- Start a new author group on a new day, a new author, or after a
+                 5-minute lull — so the name + gap only print once per run. -->
+            {@const firstInGroup =
+              newDay ||
+              !prev ||
+              prev.author_id !== m.author_id ||
+              m.created_at - prev.created_at > 5 * 60 * 1000}
+            <Message {m} {firstInGroup} />
+          {/each}
+        {/if}
+      </div>
     </main>
 
       <Composer />

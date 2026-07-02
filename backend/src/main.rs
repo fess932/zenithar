@@ -481,6 +481,7 @@ async fn main() -> Result<()> {
         // reverse-proxy — whose own /dashboard*,/v1/* traffic would otherwise echo
         // back as traces. Mirrors GreptimeDB's native paths so the SPA resolves.
         .route("/api/health", get(|| async { "ok" }))
+        .route("/api/version", get(routes::version))
         .route("/dashboard", any(dashproxy::proxy))
         .route("/dashboard/", any(dashproxy::proxy))
         .route("/dashboard/{*path}", any(dashproxy::proxy))
@@ -496,4 +497,24 @@ async fn main() -> Result<()> {
     );
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cache_control_for;
+
+    #[test]
+    fn cache_policy_by_path() {
+        // The entry shell must always revalidate so a deploy is picked up.
+        assert_eq!(cache_control_for("index.html"), "no-cache");
+        // Version-fingerprinted wasm can be cached forever.
+        assert!(cache_control_for("assets/dotlottie-player-0.75.0.wasm").contains("immutable"));
+        // Stickers: a week (not fingerprinted, but stable).
+        assert_eq!(cache_control_for("assets/stickers/heart.json"), "public, max-age=604800");
+        // Other assets (icons/manifest): a day.
+        assert_eq!(cache_control_for("assets/icon.svg"), "public, max-age=86400");
+        // Un-fingerprinted bundle → revalidate (never immutable, or a deploy sticks).
+        assert_eq!(cache_control_for("main.js"), "no-cache");
+        assert!(!cache_control_for("main.js").contains("immutable"));
+    }
 }

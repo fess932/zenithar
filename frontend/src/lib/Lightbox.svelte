@@ -43,8 +43,10 @@
 
   function onKey(e: KeyboardEvent): void {
     if (!state) return;
-    if (e.key === "Escape") closeLightbox();
-    else if (e.key === "ArrowRight") go(1);
+    if (e.key === "Escape") {
+      e.stopImmediatePropagation(); // don't also close a Profile viewer underneath
+      closeLightbox();
+    } else if (e.key === "ArrowRight") go(1);
     else if (e.key === "ArrowLeft") go(-1);
   }
 

@@ -230,14 +230,19 @@ function rmsLevel(an: AnalyserNode): number {
 
 function startMeter(): void {
   if (meterRaf !== null) return;
+  // Sample ~every 3rd frame (~20fps): the bars still look smooth but we avoid a
+  // 60fps store write (→ Call.svelte re-render) for the whole call. Cheaper on CPU
+  // and battery, especially on phones.
+  let frame = 0;
   const tick = (): void => {
+    meterRaf = requestAnimationFrame(tick);
+    if (frame++ % 3 !== 0) return;
     let remote = 0;
     for (const an of remoteAnalysers.values()) remote = Math.max(remote, rmsLevel(an));
     callLevels.set({
       local: localAnalyser ? rmsLevel(localAnalyser) : 0,
       remote,
     });
-    meterRaf = requestAnimationFrame(tick);
   };
   meterRaf = requestAnimationFrame(tick);
 }

@@ -159,6 +159,10 @@ jobs:
           export NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
           cd app
           bun run tauri android init
+          # Android launcher icons: `android init` regenerated gen/android with the
+          # DEFAULT Tauri icons, so (re)generate ours into it NOW — the earlier
+          # `tauri icon` (pre-init) only did the desktop set.
+          bun run tauri icon app-icon.png
           # compile/targetSdk live in the generated Gradle (minSdk comes from
           # tauri.conf). Pin them to 36 (Play's target from 2026-08-31); tolerant
           # if the template's syntax differs.

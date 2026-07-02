@@ -16,6 +16,7 @@
 //! exactly as before (no push).
 
 use std::sync::Mutex;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
@@ -87,7 +88,13 @@ impl Fcm {
             client_email: sa.client_email,
             token_uri: sa.token_uri,
             key,
-            http: reqwest::Client::new(),
+            // Explicit timeouts so a stalled Google connection (RU networks throttle
+            // them) fails fast and lets the retry kick in, instead of hanging.
+            http: reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(5))
+                .timeout(Duration::from_secs(10))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             cached: Mutex::new(None),
         }))
     }
@@ -113,16 +120,16 @@ impl Fcm {
         let jwt = jsonwebtoken::encode(&Header::new(Algorithm::RS256), &claims, &self.key)
             .context("signing FCM JWT")?;
 
-        let resp = self
-            .http
-            .post(&self.token_uri)
-            .form(&[
-                ("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"),
-                ("assertion", &jwt),
-            ])
-            .send()
-            .await
-            .context("FCM token request failed")?;
+        let resp = send_with_retry(
+            || {
+                self.http.post(&self.token_uri).form(&[
+                    ("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"),
+                    ("assertion", &jwt),
+                ])
+            },
+            "FCM token request failed",
+        )
+        .await?;
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
@@ -153,14 +160,11 @@ impl Fcm {
             }
         });
 
-        let resp = self
-            .http
-            .post(&url)
-            .bearer_auth(&access)
-            .json(&payload)
-            .send()
-            .await
-            .context("FCM send failed")?;
+        let resp = send_with_retry(
+            || self.http.post(&url).bearer_auth(&access).json(&payload),
+            "FCM send failed",
+        )
+        .await?;
 
         if resp.status().is_success() {
             return Ok(true);
@@ -173,5 +177,29 @@ impl Fcm {
             return Ok(false);
         }
         anyhow::bail!("FCM send {status}: {text}")
+    }
+}
+
+/// Send a request, retrying transient transport failures (timeout/connection) a
+/// couple of times with a short backoff. Google endpoints are flaky from some
+/// networks and a dropped push isn't fatal, so best-effort is fine. Only the
+/// `.send()` transport error is retried — a returned HTTP status is handled by
+/// the caller (a 401/404 wouldn't be fixed by retrying).
+async fn send_with_retry<F>(make: F, ctx: &'static str) -> Result<reqwest::Response>
+where
+    F: Fn() -> reqwest::RequestBuilder,
+{
+    const RETRIES: u32 = 2;
+    let mut attempt = 0u32;
+    loop {
+        match make().send().await {
+            Ok(resp) => return Ok(resp),
+            Err(e) if attempt < RETRIES => {
+                attempt += 1;
+                tracing::debug!(attempt, ctx, error = %e, "FCM request failed — retrying");
+                tokio::time::sleep(Duration::from_millis(200 * u64::from(attempt))).await;
+            }
+            Err(e) => return Err(e).context(ctx),
+        }
     }
 }

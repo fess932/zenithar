@@ -159,6 +159,18 @@ const HISTORY_PAGE = 50;
 export const hasMoreHistory = writable(true);
 let loadingOlder = false;
 
+// Cap the in-memory transcript so an active room can't grow without bound (memory
+// + DOM nodes). Only trimmed while the view is pinned to the bottom — scrolling up
+// to read history must never yank messages out from under the reader. Trimmed-off
+// older messages reload via `loadOlder` on scroll-up.
+const MAX_LIVE_MESSAGES = 300;
+let viewPinned = true;
+/// Chat.svelte reports whether the transcript is scrolled to the bottom, gating
+/// the transcript-cap trim above.
+export function setViewPinned(v: boolean): void {
+  viewPinned = v;
+}
+
 // Remember the open room across reloads: persist whenever it changes, and rejoin
 // it on (re)connect if it still exists (the server falls back to the default room
 // otherwise). Lets a refresh keep you where you were.
@@ -259,8 +271,17 @@ export function notify(msg: string): void {
 
 let ws: WebSocket | null = null;
 let backoff = 500;
+// Single reconnect timer so a manual resync + the auto-backoff can't both fire
+// connect() and spawn parallel sockets (which would duplicate every message).
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function connect(): void {
+  // Single-flight: never open a second socket while one is live or opening.
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   const proto = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   status.set("connecting");
@@ -297,7 +318,13 @@ export function connect(): void {
     } else if (f.type === "message") {
       const msg = (f as { message: ChatMessage }).message;
       if (msg.room_id !== get(activeRoom)) return; // not the open room
-      messages.update((all) => [...all, msg]);
+      const next = [...get(messages), msg];
+      if (viewPinned && next.length > MAX_LIVE_MESSAGES) {
+        messages.set(next.slice(-MAX_LIVE_MESSAGES));
+        hasMoreHistory.set(true); // we dropped older ones → they're loadable again
+      } else {
+        messages.set(next);
+      }
       sendRead(msg.room_id, msg.created_at); // we're viewing it → mark read
       incomingHandler?.(msg);
     } else if (f.type === "read") {
@@ -356,7 +383,9 @@ export function connect(): void {
   ws.onclose = () => {
     status.set("down");
     online.set({}); // stale until the next snapshot
-    setTimeout(connect, backoff);
+    ws = null; // let the single-flight guard permit the next connect()
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connect, backoff);
     backoff = Math.min(backoff * 2, 8000);
   };
   ws.onerror = () => ws?.close();
