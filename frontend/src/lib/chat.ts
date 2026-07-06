@@ -319,6 +319,9 @@ export function connect(): void {
       if (msgs.length) sendRead(room, msgs[msgs.length - 1].created_at); // read receipt
     } else if (f.type === "message") {
       const msg = (f as { message: ChatMessage }).message;
+      // Update the chat-list preview + ordering live (works for the active room;
+      // other rooms bump via client-notice / rooms-changed below).
+      bumpRoomPreview(msg.room_id, msg.body, msg.author_name, msg.created_at);
       if (msg.room_id !== get(activeRoom)) return; // not the open room
       const next = [...get(messages), msg];
       if (viewPinned && next.length > MAX_LIVE_MESSAGES) {
@@ -356,6 +359,9 @@ export function connect(): void {
       void loadRooms(); // e.g. someone opened a DM with us — refresh the list
     } else if (f.type === "client-notice") {
       const n = (f as { notice: ClientNotice }).notice;
+      // Live chat-list preview for a client room we're not currently viewing (its
+      // messages don't arrive as "message" frames on this socket).
+      bumpRoomPreview(n.room_id, n.preview, n.from_name, n.created_at);
       // Sound/toast only (the unread count comes from the "unread" frame below,
       // which covers every room — not just anonymous-client ones).
       if (n.room_id !== get(activeRoom)) clientNoticeHandler?.(n);
@@ -366,6 +372,10 @@ export function connect(): void {
       const room = (f as { room_id: string }).room_id;
       if (room !== get(activeRoom)) {
         unread.update((u) => ({ ...u, [room]: (u[room] ?? 0) + 1 }));
+        // This frame carries no message body, so we can't bump the preview
+        // directly (unlike message/client-notice) — refetch the list soon,
+        // debounced so a burst across rooms coalesces into one request.
+        scheduleRoomsRefresh();
       }
     } else if (f.type === "presence-snapshot") {
       const list = (f as { online: PresenceEntry[] }).online;
@@ -520,6 +530,41 @@ export async function loadRooms(): Promise<void> {
   } catch {
     rooms.set([]);
   }
+}
+
+// Coalesce a burst of preview-less `unread` frames into a single /api/rooms
+// refresh (~0.6s), so rooms with no live preview source still catch up quickly.
+let roomsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleRoomsRefresh(): void {
+  if (roomsRefreshTimer) return;
+  roomsRefreshTimer = setTimeout(() => {
+    roomsRefreshTimer = null;
+    void loadRooms();
+  }, 600);
+}
+
+/// Live chat-list update from the WS stream: refresh a room's last-message
+/// preview and float it to the top (most-recent-first), so the list reflects new
+/// messages immediately instead of waiting for the next /api/rooms refresh. No-op
+/// if the room isn't in the list yet — a brand-new room arrives via the
+/// "rooms-changed" frame, which refetches the whole list.
+function bumpRoomPreview(roomId: string, body: string, author: string, at: number): void {
+  rooms.update((list) => {
+    const i = list.findIndex((r) => r.id === roomId);
+    if (i < 0) return list;
+    // Stale delivery (older than what we already show) → leave order/preview.
+    if ((list[i].last_at ?? 0) > at) return list;
+    const next = list.map((r) =>
+      r.id === roomId ? { ...r, last_at: at, last_body: body, last_author: author } : r,
+    );
+    // Mirror the server's /api/rooms order: the common room is pinned first, then
+    // most-recent activity — so a live bump matches a later loadRooms refresh.
+    next.sort((a, b) => {
+      if ((a.kind === "common") !== (b.kind === "common")) return a.kind === "common" ? -1 : 1;
+      return (b.last_at ?? 0) - (a.last_at ?? 0);
+    });
+    return next;
+  });
 }
 
 /// Fetch a page of messages older than what's loaded and prepend them. Returns
