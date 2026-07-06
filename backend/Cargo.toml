@@ -36,6 +36,10 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # than JPEG at equal quality, keeps alpha. The C toolchain is already present for
 # audiopus (libopus), so this adds no new build barrier.
 webp = "0.3"
+# SIMD-accelerated, high-quality (Lanczos3) downscaling for the viewer preview —
+# pure Rust, several× faster than the `image` crate's resize. The `image` feature
+# lets it resize `DynamicImage` buffers directly.
+fast_image_resize = { version = "5", features = ["image"] }
 # WebRTC voice calls — sans-IO `rtc` crate. The server is the peer in the media
 # path (ICE/DTLS/SRTP/RTP terminate here); we drive the I/O loop ourselves, which
 # makes the forwarding logic unit-testable and gives full ICE/socket control.

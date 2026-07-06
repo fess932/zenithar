@@ -18,6 +18,16 @@
 
   // A sticker message renders the bundled animation instead of a text bubble.
   $: stickerDef = m.sticker ? sticker(m.sticker) : undefined;
+
+  // A lone transparent image (no text/reply) is effectively a sticker — render it
+  // bare (no bubble chrome or background), like the animated-emoji path.
+  $: stickerImage =
+    !m.sticker &&
+    !m.body.trim() &&
+    !m.reply_to &&
+    m.attachments.length === 1 &&
+    m.attachments[0].content_type.startsWith("image/") &&
+    !!m.attachments[0].has_alpha;
   // First message of an author's run: only then do we print the name + add the
   // group gap. Continuation lines tuck under it. Computed by the parent loop.
   export let firstInGroup = true;
@@ -135,8 +145,10 @@
                 ? ''
                 : 'overflow-hidden rounded border border-line hover:border-beacon'}"
             >
+              <!-- Transparent images use the original (alpha intact); the JPEG
+                   thumbnail would flatten their transparency to solid black. -->
               <img
-                src={a.has_thumb ? thumb(a.id) : orig(a.id)}
+                src={a.has_alpha || !a.has_thumb ? orig(a.id) : thumb(a.id)}
                 alt={a.filename}
                 loading="lazy"
                 class="max-h-44 max-w-[10rem] {a.has_alpha ? 'object-contain' : 'object-cover'}"
@@ -213,6 +225,29 @@
   </span>
 {/snippet}
 
+<!-- A lone transparent image: rendered bare like a sticker — no bubble, no frame,
+     just the image + a small time. -->
+{#snippet imageStickerBlock()}
+  {@const a = m.attachments[0]}
+  <button
+    type="button"
+    onclick={() => openLightbox(a.id)}
+    class="block cursor-zoom-in transition hover:brightness-110 active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100"
+  >
+    <img
+      src={orig(a.id)}
+      alt={a.filename}
+      loading="lazy"
+      class="max-h-52 max-w-[13rem] object-contain"
+    />
+  </button>
+  <span class="mt-0.5 font-mono text-[0.6rem] text-muted" title={fullTime(m.created_at)}>
+    {fmtTime(m.created_at)}{#if mine}<span class="ml-0.5 {readByOthers ? 'text-sky-400' : ''}"
+        >{readByOthers ? "✓✓" : "✓"}</span
+      >{/if}
+  </span>
+{/snippet}
+
 <!-- Reaction chips below the bubble; tap to toggle your own. -->
 {#snippet reactionChips()}
   {#if m.reactions.length > 0}
@@ -257,7 +292,7 @@
     onclick={onTap}
     oncontextmenu={onContextMenu}
   >
-    {#if m.sticker}{@render stickerBlock()}{:else}{@render bubbleBlock()}{/if}
+    {#if m.sticker}{@render stickerBlock()}{:else if stickerImage}{@render imageStickerBlock()}{:else}{@render bubbleBlock()}{/if}
     {@render reactionChips()}
   </div>
 {:else}
@@ -293,7 +328,7 @@
           {m.author_name}
         </span>
       {/if}
-      {#if m.sticker}{@render stickerBlock()}{:else}{@render bubbleBlock()}{/if}
+      {#if m.sticker}{@render stickerBlock()}{:else if stickerImage}{@render imageStickerBlock()}{:else}{@render bubbleBlock()}{/if}
       {@render reactionChips()}
     </div>
   </div>

@@ -237,6 +237,31 @@ fn decode_oriented(bytes: &[u8]) -> Option<image::DynamicImage> {
     Some(img)
 }
 
+/// Downscale `img` so its longest side is at most `max`, preserving aspect, using
+/// SIMD Lanczos3 (fast_image_resize) — several× faster than the image crate's
+/// resize at the same quality. Normalizes to 8-bit RGB/RGBA first so the pixel
+/// type is one the resizer handles. None if the resize fails.
+fn downscale(img: &image::DynamicImage, max: u32) -> Option<image::DynamicImage> {
+    use fast_image_resize::{FilterType, ResizeAlg, ResizeOptions, Resizer};
+    let ratio = max as f32 / img.width().max(img.height()) as f32;
+    let dw = ((img.width() as f32 * ratio).round() as u32).max(1);
+    let dh = ((img.height() as f32 * ratio).round() as u32).max(1);
+    let src: image::DynamicImage = if img.color().has_alpha() {
+        img.to_rgba8().into()
+    } else {
+        img.to_rgb8().into()
+    };
+    let mut dst = image::DynamicImage::new(dw, dh, src.color());
+    Resizer::new()
+        .resize(
+            &src,
+            &mut dst,
+            &ResizeOptions::new().resize_alg(ResizeAlg::Convolution(FilterType::Lanczos3)),
+        )
+        .ok()?;
+    Some(dst)
+}
+
 /// Store the original; if it decodes as an image, also store a JPEG thumbnail, a
 /// downscaled WebP viewer preview (large images), and record its dimensions +
 /// whether it has transparency. Runs on a blocking thread.
@@ -271,20 +296,18 @@ fn process_and_store(
             // the JPEG thumbnail), so transparent images get a light preview too.
             // Small images have no preview → the viewer falls back to the original.
             if width > PREVIEW_MAX as i64 || height > PREVIEW_MAX as i64 {
-                let preview = img.resize(
-                    PREVIEW_MAX,
-                    PREVIEW_MAX,
-                    image::imageops::FilterType::Lanczos3,
-                );
-                let webp = if has_alpha {
-                    let rgba = preview.to_rgba8();
-                    webp::Encoder::from_rgba(&rgba, rgba.width(), rgba.height())
-                        .encode(PREVIEW_QUALITY)
-                } else {
-                    let rgb = preview.to_rgb8();
-                    webp::Encoder::from_rgb(&rgb, rgb.width(), rgb.height()).encode(PREVIEW_QUALITY)
-                };
-                storage.put(&preview_key(id), &webp)?;
+                if let Some(preview) = downscale(&img, PREVIEW_MAX) {
+                    let webp = if has_alpha {
+                        let rgba = preview.to_rgba8();
+                        webp::Encoder::from_rgba(&rgba, rgba.width(), rgba.height())
+                            .encode(PREVIEW_QUALITY)
+                    } else {
+                        let rgb = preview.to_rgb8();
+                        webp::Encoder::from_rgb(&rgb, rgb.width(), rgb.height())
+                            .encode(PREVIEW_QUALITY)
+                    };
+                    storage.put(&preview_key(id), &webp)?;
+                }
             }
 
             Prepared {

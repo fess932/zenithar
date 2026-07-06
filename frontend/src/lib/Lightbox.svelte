@@ -17,8 +17,92 @@
     if (savedOk) setTimeout(() => (savedOk = false), 1500);
   }
 
-  // Fit-to-screen by default; tap the image to view it at full size and scroll.
-  let zoomed = false;
+  // Zoom & pan for the shown image. Fit-to-screen at scale 1; pinch (two fingers)
+  // or the wheel zooms in, a drag pans when zoomed, double-tap toggles. Reset when
+  // the image changes. `tx`/`ty` are pixel offsets, applied via a CSS transform.
+  let zoom = 1;
+  let tx = 0;
+  let ty = 0;
+  let gesturing = false; // true mid-drag/pinch → drop the transform transition
+  let imgEl: HTMLImageElement | undefined;
+  const MAX_ZOOM = 5;
+
+  const pointers = new Map<number, { x: number; y: number }>();
+  let startDist = 0;
+  let startZoom = 1;
+  let panStart: { x: number; y: number; tx: number; ty: number } | null = null;
+
+  function resetZoom(): void {
+    zoom = 1;
+    tx = 0;
+    ty = 0;
+  }
+
+  // Keep the image roughly in view: at `zoom` it grows by (dim*(zoom-1)), so half
+  // that brings each edge to the frame. Add a 20% overscroll margin so content
+  // right at the edge — e.g. the top, tucked under the toolbar — can be pulled
+  // clear instead of jamming against the boundary.
+  function clampPan(): void {
+    if (!imgEl) return;
+    const maxX = (imgEl.clientWidth * (zoom - 1)) / 2 + imgEl.clientWidth * 0.2;
+    const maxY = (imgEl.clientHeight * (zoom - 1)) / 2 + imgEl.clientHeight * 0.2;
+    tx = Math.min(maxX, Math.max(-maxX, tx));
+    ty = Math.min(maxY, Math.max(-maxY, ty));
+  }
+
+  function onImgPointerDown(e: PointerEvent): void {
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      startDist = Math.hypot(a.x - b.x, a.y - b.y);
+      startZoom = zoom;
+      panStart = null;
+      gesturing = true;
+    } else if (pointers.size === 1 && zoom > 1) {
+      panStart = { x: e.clientX, y: e.clientY, tx, ty };
+      gesturing = true;
+    }
+  }
+
+  function onImgPointerMove(e: PointerEvent): void {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2 && startDist > 0) {
+      const [a, b] = [...pointers.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      zoom = Math.min(MAX_ZOOM, Math.max(1, startZoom * (dist / startDist)));
+      clampPan();
+    } else if (panStart && zoom > 1) {
+      tx = panStart.tx + (e.clientX - panStart.x);
+      ty = panStart.ty + (e.clientY - panStart.y);
+      clampPan();
+    }
+  }
+
+  function onImgPointerUp(e: PointerEvent): void {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) startDist = 0;
+    if (pointers.size === 0) {
+      panStart = null;
+      gesturing = false;
+    }
+    if (zoom <= 1.01) resetZoom(); // snap back to a clean fit
+  }
+
+  // Desktop wheel zoom, centered.
+  function onWheel(e: WheelEvent): void {
+    e.preventDefault();
+    zoom = Math.min(MAX_ZOOM, Math.max(1, zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+    if (zoom === 1) resetZoom();
+    else clampPan();
+  }
+
+  // Double-tap / double-click toggles between fit and a 2.5× look.
+  function onDblClick(): void {
+    if (zoom > 1) resetZoom();
+    else zoom = 2.5;
+  }
 
   // Honor prefers-reduced-motion: collapse all transition durations to 0.
   let reduce = false;
@@ -31,7 +115,7 @@
   $: current = state ? state.items[state.index] : null;
   $: many = (state?.items.length ?? 0) > 1;
   // Reset zoom whenever the shown image changes.
-  $: state?.index, (zoomed = false);
+  $: state?.index, resetZoom();
 
   // Direction of the last step, so the incoming image slides in from the
   // correct side (0 on first open = a plain fade-in).
@@ -56,7 +140,7 @@
     touchX = e.changedTouches[0]?.clientX ?? null;
   }
   function onTouchEnd(e: TouchEvent): void {
-    if (touchX === null || zoomed) return;
+    if (touchX === null || zoom > 1) return; // panning a zoomed image ≠ paging
     const dx = (e.changedTouches[0]?.clientX ?? touchX) - touchX;
     if (Math.abs(dx) > 50) go(dx < 0 ? 1 : -1);
     touchX = null;
@@ -146,23 +230,36 @@
             class="pointer-events-auto max-h-full max-w-full rounded-md object-contain shadow-2xl"
           ></video>
         {:else}
-          <button
-            type="button"
-            onclick={() => (zoomed = !zoomed)}
+          <!-- Pinch / wheel to zoom, drag to pan, double-tap to toggle. touch-none
+               hands raw gestures to our pointer handlers instead of the browser. -->
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+          <div
+            role="img"
             aria-label={current.alt}
             in:fly={{ x: ms(dir * 40), duration: ms(220), easing: quintOut }}
-            class="pointer-events-auto flex max-h-full max-w-full items-center justify-center {zoomed
-              ? 'cursor-zoom-out'
+            onpointerdown={onImgPointerDown}
+            onpointermove={onImgPointerMove}
+            onpointerup={onImgPointerUp}
+            onpointercancel={onImgPointerUp}
+            onwheel={onWheel}
+            ondblclick={onDblClick}
+            class="pointer-events-auto flex max-h-full max-w-full touch-none items-center justify-center {zoom >
+            1
+              ? 'cursor-grab'
               : 'cursor-zoom-in'}"
           >
             <img
+              bind:this={imgEl}
               src={current.src}
               alt={current.alt}
-              class="rounded-md shadow-2xl transition-transform duration-200 motion-reduce:transition-none {zoomed
-                ? 'max-w-none'
-                : 'max-h-full max-w-full object-contain'}"
+              draggable="false"
+              style="transform: translate3d({tx}px, {ty}px, 0) scale({zoom}); transition: {gesturing
+                ? 'none'
+                : 'transform 0.15s ease-out'};"
+              class="max-h-full max-w-full select-none rounded-md object-contain shadow-2xl"
+              class:checkerboard={current.transparent}
             />
-          </button>
+          </div>
         {/if}
       {/key}
     </div>

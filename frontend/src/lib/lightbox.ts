@@ -13,6 +13,7 @@ export interface LightboxItem {
   alt: string;
   filename: string;
   saveable?: boolean; // show the "save to сохранёнки" button (default true)
+  transparent?: boolean; // has alpha → back it with a checkerboard so dark art shows
 }
 
 interface LightboxState {
@@ -65,6 +66,7 @@ export function openLightbox(attachmentId: string): void {
           download: orig(a.id),
           alt: a.filename,
           filename: a.filename,
+          transparent: kind === "image" && !!a.has_alpha,
         });
       }
     }

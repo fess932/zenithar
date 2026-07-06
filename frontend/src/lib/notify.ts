@@ -73,6 +73,35 @@ export function toggleMute(room_id: string): void {
   });
 }
 
+// ---- global notification-sound toggle (persisted) --------------------------
+
+const SOUND_KEY = "zenithar.soundMuted";
+
+function readSoundMuted(): boolean {
+  try {
+    return localStorage.getItem(SOUND_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/// A global "silent" switch: when on, no notification chime plays (toasts and the
+/// unread badge still work). Single source of truth — a future hook that reads the
+/// OS silent/vibrate state can just drive this store.
+export const soundMuted = writable<boolean>(readSoundMuted());
+
+soundMuted.subscribe((v) => {
+  try {
+    localStorage.setItem(SOUND_KEY, v ? "1" : "0");
+  } catch {
+    /* private mode — keep it in memory only */
+  }
+});
+
+export function toggleSound(): void {
+  soundMuted.update((v) => !v);
+}
+
 // ---- sound ------------------------------------------------------------------
 
 type ACtor = typeof AudioContext;
@@ -82,6 +111,7 @@ let audioCtx: AudioContext | null = null;
 /// plays a quieter single low blip — for a message in the tab you're already
 /// looking at; the default two-note chime is for a backgrounded tab.
 function chime(soft = false): void {
+  if (get(soundMuted)) return; // global silent switch — no notification sound
   try {
     const Ctor: ACtor | undefined =
       window.AudioContext ??

@@ -339,8 +339,9 @@
     </div>
   {/if}
 
-  <!-- pending attachments (max 5) -->
-  {#if pending.length > 0}
+  <!-- pending attachments (max 5), plus an in-progress chip while a file uploads
+       (the wait covers server-side image processing, so show it's not stuck) -->
+  {#if pending.length > 0 || uploading}
     <div class="mb-2 flex flex-wrap gap-2">
       {#each pending as a (a.id)}
         <div class="flex items-center gap-2 rounded-md border border-line bg-surface-2 py-1 pl-1 pr-2">
@@ -370,6 +371,16 @@
           </button>
         </div>
       {/each}
+      {#if uploading}
+        <div
+          class="flex items-center gap-2 rounded-md border border-line bg-surface-2 py-1 pl-2 pr-2.5"
+        >
+          <span
+            class="size-4 shrink-0 animate-spin rounded-full border-2 border-line border-t-beacon motion-reduce:animate-none"
+          ></span>
+          <span class="font-mono text-[0.74rem] text-muted">{$t("uploading")}</span>
+        </div>
+      {/if}
     </div>
   {/if}
 

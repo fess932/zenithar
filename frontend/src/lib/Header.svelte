@@ -16,6 +16,7 @@
     type ReleaseAsset,
   } from "./util/download";
   import { isApp } from "./platform";
+  import { soundMuted, toggleSound } from "./notify";
   import Connections from "./Connections.svelte";
   import Avatar from "./Avatar.svelte";
   import AvatarEditor from "./AvatarEditor.svelte";
@@ -375,6 +376,21 @@
           </button>
         {/each}
       </div>
+
+      <!-- Global silent switch: mutes the notification chime everywhere (toasts and
+           the unread badge stay). A later hook can drive this from the OS state. -->
+      <button
+        type="button"
+        aria-pressed={$soundMuted}
+        onclick={toggleSound}
+        class="flex cursor-pointer items-center justify-between rounded-md border border-line px-2 py-2 font-mono text-[0.74rem] uppercase tracking-[0.08em] text-muted hover:text-text aria-[pressed=true]:border-beacon/50 aria-[pressed=true]:text-beacon"
+      >
+        <span class="flex items-center gap-2">
+          <span class="text-base leading-none">{$soundMuted ? "🔕" : "🔔"}</span>
+          {$t("notifSound")}
+        </span>
+        <span>{$soundMuted ? $t("off") : $t("on")}</span>
+      </button>
 
       <!-- Microphone for calls + voice notes (handy on desktop with several mics). -->
       <div class="flex items-center gap-2 rounded-md border border-line px-2 py-1">
