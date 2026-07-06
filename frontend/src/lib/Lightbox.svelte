@@ -108,7 +108,7 @@
         </button>
       {/if}
       <a
-        href={current.src}
+        href={current.download ?? current.src}
         download={current.filename}
         aria-label={$t("download")}
         title={$t("download")}

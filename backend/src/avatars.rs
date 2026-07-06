@@ -11,9 +11,9 @@ use axum::response::{IntoResponse, Json, Response};
 use serde::{Deserialize, Serialize};
 
 use crate::auth::{self, Identity};
+use crate::now_millis;
 use crate::routes::origin_ok;
 use crate::state::AppState;
-use crate::now_millis;
 
 /// 6 MB ceiling for an avatar upload (decoded + re-encoded server-side anyway).
 const MAX_AVATAR_BYTES: usize = 6 * 1024 * 1024;
@@ -119,13 +119,18 @@ pub async fn set_photo(
     .await;
     match stored {
         Ok(Ok(true)) => {}
-        Ok(Ok(false)) => return (StatusCode::UNSUPPORTED_MEDIA_TYPE, "not an image").into_response(),
+        Ok(Ok(false)) => {
+            return (StatusCode::UNSUPPORTED_MEDIA_TYPE, "not an image").into_response()
+        }
         _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 
     let value = format!("photo:{}", now_millis());
     match auth::set_avatar(&state.db, &p.id, Some(&value)).await {
-        Ok(()) => Json(AvatarResp { avatar: Some(value) }).into_response(),
+        Ok(()) => Json(AvatarResp {
+            avatar: Some(value),
+        })
+        .into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }

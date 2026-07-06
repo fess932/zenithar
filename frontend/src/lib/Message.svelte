@@ -126,23 +126,27 @@
       <div class="mt-1 flex flex-wrap items-start gap-2">
         {#each m.attachments as a (a.id)}
           {#if a.content_type.startsWith("image/")}
+            <!-- Transparent images (stickers) render frameless — no border or
+                 surface behind them — and uncropped, so their shape reads true. -->
             <button
               type="button"
               onclick={() => openLightbox(a.id)}
-              class="block cursor-zoom-in overflow-hidden rounded-md border border-line transition hover:border-beacon hover:brightness-110 active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100"
+              class="block cursor-zoom-in transition hover:brightness-110 active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100 {a.has_alpha
+                ? ''
+                : 'overflow-hidden rounded border border-line hover:border-beacon'}"
             >
               <img
                 src={a.has_thumb ? thumb(a.id) : orig(a.id)}
                 alt={a.filename}
                 loading="lazy"
-                class="max-h-48 max-w-[12rem] object-cover"
+                class="max-h-44 max-w-[10rem] {a.has_alpha ? 'object-contain' : 'object-cover'}"
               />
             </button>
           {:else if a.content_type.startsWith("video/")}
             <button
               type="button"
               onclick={() => openLightbox(a.id)}
-              class="group relative block cursor-pointer overflow-hidden rounded-md border border-line transition hover:border-beacon active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100"
+              class="group relative block cursor-pointer overflow-hidden rounded border border-line transition hover:border-beacon active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100"
             >
               <!-- First frame as the poster; the lightbox handles playback. -->
               <!-- svelte-ignore a11y_media_has_caption -->
@@ -152,7 +156,7 @@
                 muted
                 playsinline
                 tabindex="-1"
-                class="max-h-48 max-w-[12rem] bg-black object-cover"
+                class="max-h-44 max-w-[10rem] bg-black object-cover"
               ></video>
               <span
                 class="pointer-events-none absolute inset-0 grid place-items-center transition group-hover:brightness-110"

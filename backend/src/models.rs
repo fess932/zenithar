@@ -11,6 +11,9 @@ pub struct Attachment {
     pub width: Option<i64>,
     pub height: Option<i64>,
     pub has_thumb: bool,
+    /// Image carries an alpha channel (transparent PNG/WebP) → render frameless.
+    #[serde(default)]
+    pub has_alpha: bool,
 }
 
 /// A "сохранёнка" — one image in a user's private saved collection. Holds its own
@@ -248,7 +251,10 @@ pub enum Outbound {
     },
     /// Snapshot on join: the newest timestamp OTHERS have read to in this room, so
     /// existing sent messages render ✓/✓✓ correctly on load.
-    ReadState { room_id: String, others_read_at: i64 },
+    ReadState {
+        room_id: String,
+        others_read_at: i64,
+    },
     /// The caller's room list changed (e.g. someone opened a DM with them) —
     /// refetch `/api/rooms`. Sent targeted at the affected principal.
     RoomsChanged,

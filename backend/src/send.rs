@@ -114,7 +114,11 @@ pub async fn push_reaction(
             return;
         }
     };
-    let title = if from_name.is_empty() { emoji } else { from_name };
+    let title = if from_name.is_empty() {
+        emoji
+    } else {
+        from_name
+    };
     for (token, _pid) in tokens {
         match fcm.send(&token, title, emoji, room_id).await {
             Ok(true) => {}

@@ -136,3 +136,9 @@ impl Storage for DiskStorage {
 pub fn thumb_key(id: &str) -> String {
     format!("{id}.thumb")
 }
+
+/// A downscaled JPEG for the in-app viewer (so opening a huge photo doesn't pull
+/// the full-resolution original). Stored next to the original under `<id>.preview`.
+pub fn preview_key(id: &str) -> String {
+    format!("{id}.preview")
+}

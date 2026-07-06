@@ -214,7 +214,9 @@ pub async fn stats(State(state): State<AppState>, _admin: Admin) -> Json<Stats> 
         fs_avail,
     };
 
-    out.memory = rss_bytes().map(|b| Memory { rss_bytes: b as i64 });
+    out.memory = rss_bytes().map(|b| Memory {
+        rss_bytes: b as i64,
+    });
 
     Json(out)
 }

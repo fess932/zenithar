@@ -12,6 +12,8 @@ export interface Attachment {
   width: number | null;
   height: number | null;
   has_thumb: boolean;
+  // Transparent PNG/WebP → rendered frameless (no border/surface behind it).
+  has_alpha?: boolean;
 }
 
 export interface ReplyPreview {

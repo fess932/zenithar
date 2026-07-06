@@ -63,7 +63,10 @@ pub async fn save_from(
         return Json(existing).into_response();
     }
     let new_id = Ulid::new().to_string();
-    if copy_blob(&state, &att_id, &new_id, src.has_thumb).await.is_err() {
+    if copy_blob(&state, &att_id, &new_id, src.has_thumb)
+        .await
+        .is_err()
+    {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
     let item = SavedItem {
@@ -163,7 +166,10 @@ pub async fn attach(
         return StatusCode::FORBIDDEN.into_response();
     }
     let new_id = Ulid::new().to_string();
-    if copy_blob(&state, &id, &new_id, item.has_thumb).await.is_err() {
+    if copy_blob(&state, &id, &new_id, item.has_thumb)
+        .await
+        .is_err()
+    {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
     let att = Attachment {
@@ -174,6 +180,8 @@ pub async fn attach(
         width: item.width,
         height: item.height,
         has_thumb: item.has_thumb,
+        // Saved items are stored as opaque previews — no alpha flag to carry.
+        has_alpha: false,
     };
     match db::insert_attachment(&state.db, &att, &body.room_id, &p.id, now_millis()).await {
         Ok(()) => Json(att).into_response(),

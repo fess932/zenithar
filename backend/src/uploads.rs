@@ -14,7 +14,7 @@ use crate::auth::{Identity, Principal};
 use crate::models::{Attachment, SavedItem};
 use crate::routes::origin_ok;
 use crate::state::AppState;
-use crate::storage::{thumb_key, Storage};
+use crate::storage::{preview_key, thumb_key, Storage};
 use crate::{db, now_millis};
 
 /// Default per-upload ceiling (images, files, voice). Videos get a bigger one.
@@ -22,10 +22,19 @@ pub const MAX_UPLOAD_BYTES: usize = 40 * 1024 * 1024;
 /// Videos are legitimately large → 200 MB. Also the route body limit (below).
 pub const MAX_VIDEO_BYTES: usize = 200 * 1024 * 1024;
 const THUMB_MAX: u32 = 320;
+/// Longest-side cap for the in-app viewer preview (a downscaled WebP served
+/// instead of a multi-megapixel original when someone taps a photo open).
+const PREVIEW_MAX: u32 = 1600;
+/// WebP quality for that preview (0–100). ~80 is near-visually-lossless at a
+/// fraction of the original's weight.
+const PREVIEW_QUALITY: f32 = 80.0;
 
 /// Per-upload byte ceiling by declared content type: 200 MB for video, else 40 MB.
 fn size_limit(declared_ct: &Option<String>) -> usize {
-    if declared_ct.as_deref().is_some_and(|ct| ct.starts_with("video/")) {
+    if declared_ct
+        .as_deref()
+        .is_some_and(|ct| ct.starts_with("video/"))
+    {
         MAX_VIDEO_BYTES
     } else {
         MAX_UPLOAD_BYTES
@@ -119,6 +128,7 @@ pub async fn ingest(state: &AppState, p: &Principal, mut multipart: Multipart) -
         width: prepared.width,
         height: prepared.height,
         has_thumb: prepared.has_thumb,
+        has_alpha: prepared.has_alpha,
     };
 
     if db::insert_attachment(&state.db, &att, &room_id, &p.id, now_millis())
@@ -208,23 +218,42 @@ struct Prepared {
     width: Option<i64>,
     height: Option<i64>,
     has_thumb: bool,
+    has_alpha: bool,
 }
 
-/// Store the original; if it decodes as an image, also store a JPEG thumbnail and
-/// record its dimensions. Runs on a blocking thread.
+/// Decode `bytes`, baking in any EXIF orientation so the pixels match how a
+/// browser displays the original (portrait phone photos come out upright instead
+/// of sideways). Returns None if the bytes aren't a decodable image.
+fn decode_oriented(bytes: &[u8]) -> Option<image::DynamicImage> {
+    use image::{DynamicImage, ImageDecoder, ImageReader};
+    let reader = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    let mut decoder = reader.into_decoder().ok()?;
+    // Read the EXIF orientation before consuming the decoder, then apply it.
+    let orientation = decoder.orientation().ok()?;
+    let mut img = DynamicImage::from_decoder(decoder).ok()?;
+    img.apply_orientation(orientation);
+    Some(img)
+}
+
+/// Store the original; if it decodes as an image, also store a JPEG thumbnail, a
+/// downscaled WebP viewer preview (large images), and record its dimensions +
+/// whether it has transparency. Runs on a blocking thread.
 fn process_and_store(
     storage: &dyn Storage,
     id: &str,
     bytes: Vec<u8>,
     declared_ct: Option<String>,
 ) -> std::io::Result<Prepared> {
-    let image = image::load_from_memory(&bytes).ok();
+    let image = decode_oriented(&bytes);
     let prepared = match image {
         Some(img) => {
             let content_type = image::guess_format(&bytes)
                 .map(|f| f.to_mime_type().to_string())
                 .unwrap_or_else(|_| "image/*".to_string());
             let (width, height) = (img.width() as i64, img.height() as i64);
+            let has_alpha = img.color().has_alpha();
 
             // RGB JPEG thumbnail (drops alpha — fine for a preview).
             let thumb =
@@ -236,11 +265,34 @@ fn process_and_store(
             if has_thumb {
                 storage.put(&thumb_key(id), &buf)?;
             }
+
+            // Viewer preview: a downscaled WebP for large images so opening one
+            // doesn't fetch the full-resolution original. WebP keeps alpha (unlike
+            // the JPEG thumbnail), so transparent images get a light preview too.
+            // Small images have no preview → the viewer falls back to the original.
+            if width > PREVIEW_MAX as i64 || height > PREVIEW_MAX as i64 {
+                let preview = img.resize(
+                    PREVIEW_MAX,
+                    PREVIEW_MAX,
+                    image::imageops::FilterType::Lanczos3,
+                );
+                let webp = if has_alpha {
+                    let rgba = preview.to_rgba8();
+                    webp::Encoder::from_rgba(&rgba, rgba.width(), rgba.height())
+                        .encode(PREVIEW_QUALITY)
+                } else {
+                    let rgb = preview.to_rgb8();
+                    webp::Encoder::from_rgb(&rgb, rgb.width(), rgb.height()).encode(PREVIEW_QUALITY)
+                };
+                storage.put(&preview_key(id), &webp)?;
+            }
+
             Prepared {
                 content_type,
                 width: Some(width),
                 height: Some(height),
                 has_thumb,
+                has_alpha,
             }
         }
         None => Prepared {
@@ -248,6 +300,7 @@ fn process_and_store(
             width: None,
             height: None,
             has_thumb: false,
+            has_alpha: false,
         },
     };
     storage.put(id, &bytes)?;
@@ -276,6 +329,54 @@ pub async fn serve_thumb(
     Path(id): Path<String>,
 ) -> Response {
     serve_inner(state, p, &id, true, None).await
+}
+
+/// `GET /api/attachments/:id/preview` — the downscaled WebP viewer preview if one
+/// was generated (large images), else the original bytes. The viewer shows this;
+/// Download still points at the full-resolution original.
+pub async fn serve_preview(
+    State(state): State<AppState>,
+    Identity(p): Identity,
+    Path(id): Path<String>,
+) -> Response {
+    let Ok(Some((room_id, att))) = db::lookup_attachment(&state.reads, &id).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if !can_access(&state.reads, &p, &room_id).await {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    // Prefer the preview blob (JPEG); fall back to the original if none exists
+    // (small or transparent images, and anything uploaded before previews).
+    let storage = state.storage.clone();
+    let pkey = preview_key(&id);
+    let preview = match tokio::task::spawn_blocking(move || storage.get(&pkey)).await {
+        Ok(Ok(b)) => b,
+        _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let (content_type, bytes) = match preview {
+        Some(b) => ("image/webp".to_string(), b),
+        None => {
+            let storage = state.storage.clone();
+            let key = id.clone();
+            match tokio::task::spawn_blocking(move || storage.get(&key)).await {
+                Ok(Ok(Some(b))) => (att.content_type.clone(), b),
+                Ok(Ok(None)) => return StatusCode::NOT_FOUND.into_response(),
+                _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+            }
+        }
+    };
+    (
+        [
+            (header::CONTENT_TYPE, content_type),
+            (
+                header::CACHE_CONTROL,
+                "private, max-age=31536000, immutable".to_string(),
+            ),
+        ],
+        bytes,
+    )
+        .into_response()
 }
 
 /// Parse a single-range `Range: bytes=…` header into an inclusive `(start, end)`
@@ -350,7 +451,10 @@ async fn serve_inner(
                 [
                     (header::CONTENT_TYPE, content_type),
                     (header::ACCEPT_RANGES, "bytes".to_string()),
-                    (header::CONTENT_RANGE, format!("bytes {start}-{end}/{total}")),
+                    (
+                        header::CONTENT_RANGE,
+                        format!("bytes {start}-{end}/{total}"),
+                    ),
                     (header::CACHE_CONTROL, cache),
                 ],
                 bytes,
@@ -481,13 +585,19 @@ mod tests {
     fn content_type_validation() {
         assert_eq!(sanitize_content_type(Some("image/png".into())), "image/png");
         assert_eq!(sanitize_content_type(None), "application/octet-stream");
-        assert_eq!(sanitize_content_type(Some(String::new())), "application/octet-stream");
+        assert_eq!(
+            sanitize_content_type(Some(String::new())),
+            "application/octet-stream"
+        );
         // Header injection via CRLF is rejected.
         assert_eq!(
             sanitize_content_type(Some("image/png\r\nX: y".into())),
             "application/octet-stream"
         );
-        assert_eq!(sanitize_content_type(Some("x".repeat(200))), "application/octet-stream");
+        assert_eq!(
+            sanitize_content_type(Some("x".repeat(200))),
+            "application/octet-stream"
+        );
     }
 
     #[test]
@@ -496,5 +606,117 @@ mod tests {
         assert_eq!(size_limit(&Some("video/webm".into())), MAX_VIDEO_BYTES);
         assert_eq!(size_limit(&Some("image/png".into())), MAX_UPLOAD_BYTES);
         assert_eq!(size_limit(&None), MAX_UPLOAD_BYTES);
+    }
+
+    // --- preview / thumbnail pipeline ---------------------------------------
+
+    use super::process_and_store;
+    use crate::storage::{preview_key, thumb_key, Storage};
+    use std::collections::HashMap;
+    use std::io;
+    use std::io::Cursor;
+    use std::sync::Mutex;
+
+    /// Minimal in-memory Storage for exercising the upload pipeline.
+    #[derive(Default)]
+    struct MemStorage(Mutex<HashMap<String, Vec<u8>>>);
+    impl Storage for MemStorage {
+        fn put(&self, key: &str, bytes: &[u8]) -> io::Result<()> {
+            self.0
+                .lock()
+                .unwrap()
+                .insert(key.to_string(), bytes.to_vec());
+            Ok(())
+        }
+        fn get(&self, key: &str) -> io::Result<Option<Vec<u8>>> {
+            Ok(self.0.lock().unwrap().get(key).cloned())
+        }
+        fn remove(&self, key: &str) -> io::Result<()> {
+            self.0.lock().unwrap().remove(key);
+            Ok(())
+        }
+    }
+
+    /// PNG bytes of a solid image of the given size (a real, decodable upload).
+    fn png_bytes(w: u32, h: u32, alpha: bool) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let img = if alpha {
+            image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+                w,
+                h,
+                image::Rgba([10, 120, 200, 128]),
+            ))
+        } else {
+            image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                w,
+                h,
+                image::Rgb([10, 120, 200]),
+            ))
+        };
+        img.write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Png)
+            .unwrap();
+        buf
+    }
+
+    fn is_webp(bytes: &[u8]) -> bool {
+        bytes.len() > 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP"
+    }
+
+    #[test]
+    fn large_image_gets_a_webp_preview_and_jpeg_thumb() {
+        let store = MemStorage::default();
+        let bytes = png_bytes(2000, 1200, false);
+        let original_len = bytes.len();
+        let prep = process_and_store(&store, "abc", bytes, Some("image/png".into())).unwrap();
+
+        assert!(prep.has_thumb);
+        assert!(!prep.has_alpha);
+        assert_eq!(prep.width, Some(2000));
+        assert_eq!(prep.height, Some(1200));
+
+        // A real WebP preview blob exists and is smaller than the original.
+        let preview = store
+            .get(&preview_key("abc"))
+            .unwrap()
+            .expect("preview blob");
+        assert!(is_webp(&preview), "preview should be a valid WebP");
+        assert!(preview.len() < original_len);
+        // Thumbnail is a JPEG (starts with the SOI marker).
+        let thumb = store.get(&thumb_key("abc")).unwrap().expect("thumb blob");
+        assert_eq!(&thumb[0..2], &[0xFF, 0xD8]);
+    }
+
+    #[test]
+    fn transparent_image_previews_as_webp_with_alpha_flag() {
+        let store = MemStorage::default();
+        let prep = process_and_store(
+            &store,
+            "png",
+            png_bytes(1800, 1800, true),
+            Some("image/png".into()),
+        )
+        .unwrap();
+        assert!(prep.has_alpha, "alpha channel should be detected");
+        let preview = store
+            .get(&preview_key("png"))
+            .unwrap()
+            .expect("preview blob");
+        assert!(is_webp(&preview));
+    }
+
+    #[test]
+    fn small_image_has_no_preview_and_falls_back_to_original() {
+        let store = MemStorage::default();
+        let prep = process_and_store(
+            &store,
+            "sm",
+            png_bytes(400, 300, false),
+            Some("image/png".into()),
+        )
+        .unwrap();
+        assert!(prep.has_thumb);
+        // Below PREVIEW_MAX → no preview blob; the endpoint serves the original.
+        assert!(store.get(&preview_key("sm")).unwrap().is_none());
+        assert!(store.get("sm").unwrap().is_some());
     }
 }

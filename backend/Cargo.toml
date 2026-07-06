@@ -32,6 +32,10 @@ sha2 = "0.10"
 base64 = "0.22"
 time = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+# Lossy WebP encoder (libwebp, vendored) for the viewer preview: ~25–35% smaller
+# than JPEG at equal quality, keeps alpha. The C toolchain is already present for
+# audiopus (libopus), so this adds no new build barrier.
+webp = "0.3"
 # WebRTC voice calls — sans-IO `rtc` crate. The server is the peer in the media
 # path (ICE/DTLS/SRTP/RTP terminate here); we drive the I/O loop ourselves, which
 # makes the forwarding logic unit-testable and gives full ICE/socket control.

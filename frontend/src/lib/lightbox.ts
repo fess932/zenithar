@@ -8,7 +8,8 @@ import { messages } from "./chat";
 export interface LightboxItem {
   id: string;
   kind: "image" | "video";
-  src: string; // full-resolution URL
+  src: string; // what the viewer shows (a downscaled preview for images)
+  download?: string; // full-resolution original for the Download button (default: src)
   alt: string;
   filename: string;
   saveable?: boolean; // show the "save to сохранёнки" button (default true)
@@ -42,6 +43,7 @@ function pushHistory(): void {
 }
 
 const orig = (id: string) => `/api/attachments/${id}`;
+const preview = (id: string) => `/api/attachments/${id}/preview`;
 
 /// Open the viewer at the given attachment, with all transcript images and
 /// videos as the gallery (so prev/next can page through them).
@@ -55,7 +57,15 @@ export function openLightbox(attachmentId: string): void {
           ? "video"
           : null;
       if (kind) {
-        items.push({ id: a.id, kind, src: orig(a.id), alt: a.filename, filename: a.filename });
+        // Images show a downscaled preview; Download and video use the original.
+        items.push({
+          id: a.id,
+          kind,
+          src: kind === "image" ? preview(a.id) : orig(a.id),
+          download: orig(a.id),
+          alt: a.filename,
+          filename: a.filename,
+        });
       }
     }
   }

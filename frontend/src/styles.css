@@ -11,6 +11,17 @@ body {
   max-width: 100%;
   overflow-x: hidden;
   overscroll-behavior-x: none;
+  /* The app is always dark (its own tokens), so pin the canvas dark regardless
+     of the system theme — no white flash on load or iOS rubber-band overscroll. */
+  background-color: var(--color-ink);
+}
+
+/* Follow the system theme for NATIVE chrome only — the iOS keyboard accessory
+   bar, the caret, form-control defaults, scrollbars. The app's own surfaces stay
+   dark via our tokens; this just lets those OS-drawn bits match the phone's
+   light/dark setting instead of rendering the wrong color. */
+:root {
+  color-scheme: light dark;
 }
 
 /* Design tokens → Tailwind utilities (bg-ink, text-muted, font-mono, …).

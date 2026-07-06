@@ -377,122 +377,126 @@ async fn main() -> Result<()> {
         push,
     };
 
-    let app = Router::new()
-        .route("/ws", any(ws::ws_handler))
-        .route("/i/{token}", get(routes::enter_link))
-        .route("/api/me", get(routes::me))
-        .route("/api/ice", get(routes::ice_servers))
-        .route("/api/me/name", post(routes::rename))
-        .route("/api/me/avatar", post(avatars::set_emoji))
-        .route(
-            "/api/me/avatar/photo",
-            post(avatars::set_photo).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
-        )
-        .route("/api/avatars/{id}", get(avatars::serve))
-        .route("/api/me/app-link", post(routes::app_link))
-        .route("/api/push/register", post(routes::push_register))
-        .route("/api/push/unregister", post(routes::push_unregister))
-        .route("/api/dm", post(routes::start_dm))
-        .route("/api/rooms", get(routes::rooms))
-        .route("/api/rooms/{id}/messages", get(routes::room_messages))
-        .route("/api/people", get(routes::people))
-        .route(
-            "/api/upload",
-            post(uploads::upload).layer(DefaultBodyLimit::max(uploads::MAX_VIDEO_BYTES + 1024)),
-        )
-        .route("/api/attachments/{id}", get(uploads::serve))
-        .route("/api/attachments/{id}/thumb", get(uploads::serve_thumb))
-        // Saved items ("сохранёнки") — a user's private/public saved images.
-        .route("/api/saved", get(saved::list))
-        .route("/api/saved/of/{principal_id}", get(saved::list_of))
-        .route(
-            "/api/saved/upload",
-            post(uploads::upload_saved).layer(DefaultBodyLimit::max(uploads::MAX_VIDEO_BYTES + 1024)),
-        )
-        .route("/api/saved/from/{attachment_id}", post(saved::save_from))
-        .route("/api/saved/{id}", patch(saved::set_public).delete(saved::delete))
-        .route("/api/saved/{id}/attach", post(saved::attach))
-        .route("/api/saved/{id}/file", get(saved::serve))
-        .route("/api/saved/{id}/thumb", get(saved::serve_thumb))
-        .route("/api/auth/logout", post(routes::logout))
-        .route(
-            "/api/principals",
-            get(routes::list_principals).post(routes::create_principal),
-        )
-        .route("/api/principals/{id}/rotate", post(routes::rotate))
-        .route("/api/principals/{id}/revoke", post(routes::revoke))
-        .route(
-            "/api/integrations",
-            get(routes::list_integrations).post(routes::create_integration),
-        )
-        .route(
-            "/api/integrations/{id}/rotate",
-            post(routes::rotate_integration),
-        )
-        .route(
-            "/api/integrations/{id}/revoke",
-            post(routes::revoke_integration),
-        )
-        // Admin: usage dashboard + telemetry dashboard link + saved call recordings.
-        .route("/api/admin/stats", get(stats::stats))
-        .route("/api/admin/telemetry", get(routes::telemetry_info))
-        .route("/api/admin/recordings", get(recordings::list))
-        .route(
-            "/api/admin/recordings/{call_id}",
-            delete(recordings::delete),
-        )
-        .route(
-            "/api/admin/recordings/{call_id}/{participant_id}",
-            get(recordings::serve),
-        )
-        // REST API for integrations (Bearer zk_… auth).
-        .route("/api/v1/me", get(api::me))
-        .route("/api/v1/rooms", get(api::rooms))
-        .route(
-            "/api/v1/rooms/{id}/messages",
-            get(api::get_messages).post(api::post_message),
-        )
-        .route("/api/v1/clients", post(api::create_client))
-        .route(
-            "/api/v1/clients/{client_id}/messages",
-            post(api::post_client_message),
-        )
-        .route(
-            "/api/v1/uploads",
-            post(api::upload).layer(DefaultBodyLimit::max(uploads::MAX_VIDEO_BYTES + 1024)),
-        )
-        .fallback(static_handler)
-        // INFO-level request spans so every HTTP request becomes an exported
-        // trace (the default is DEBUG, which the `info` filter drops — leaving
-        // only call spans). Makes telemetry visible from ordinary browsing.
-        .layer(
-            TraceLayer::new_for_http().make_span_with(
+    let app =
+        Router::new()
+            .route("/ws", any(ws::ws_handler))
+            .route("/i/{token}", get(routes::enter_link))
+            .route("/api/me", get(routes::me))
+            .route("/api/ice", get(routes::ice_servers))
+            .route("/api/me/name", post(routes::rename))
+            .route("/api/me/avatar", post(avatars::set_emoji))
+            .route(
+                "/api/me/avatar/photo",
+                post(avatars::set_photo).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
+            )
+            .route("/api/avatars/{id}", get(avatars::serve))
+            .route("/api/me/app-link", post(routes::app_link))
+            .route("/api/push/register", post(routes::push_register))
+            .route("/api/push/unregister", post(routes::push_unregister))
+            .route("/api/dm", post(routes::start_dm))
+            .route("/api/rooms", get(routes::rooms))
+            .route("/api/rooms/{id}/messages", get(routes::room_messages))
+            .route("/api/people", get(routes::people))
+            .route(
+                "/api/upload",
+                post(uploads::upload).layer(DefaultBodyLimit::max(uploads::MAX_VIDEO_BYTES + 1024)),
+            )
+            .route("/api/attachments/{id}", get(uploads::serve))
+            .route("/api/attachments/{id}/thumb", get(uploads::serve_thumb))
+            .route("/api/attachments/{id}/preview", get(uploads::serve_preview))
+            // Saved items ("сохранёнки") — a user's private/public saved images.
+            .route("/api/saved", get(saved::list))
+            .route("/api/saved/of/{principal_id}", get(saved::list_of))
+            .route(
+                "/api/saved/upload",
+                post(uploads::upload_saved)
+                    .layer(DefaultBodyLimit::max(uploads::MAX_VIDEO_BYTES + 1024)),
+            )
+            .route("/api/saved/from/{attachment_id}", post(saved::save_from))
+            .route(
+                "/api/saved/{id}",
+                patch(saved::set_public).delete(saved::delete),
+            )
+            .route("/api/saved/{id}/attach", post(saved::attach))
+            .route("/api/saved/{id}/file", get(saved::serve))
+            .route("/api/saved/{id}/thumb", get(saved::serve_thumb))
+            .route("/api/auth/logout", post(routes::logout))
+            .route(
+                "/api/principals",
+                get(routes::list_principals).post(routes::create_principal),
+            )
+            .route("/api/principals/{id}/rotate", post(routes::rotate))
+            .route("/api/principals/{id}/revoke", post(routes::revoke))
+            .route(
+                "/api/integrations",
+                get(routes::list_integrations).post(routes::create_integration),
+            )
+            .route(
+                "/api/integrations/{id}/rotate",
+                post(routes::rotate_integration),
+            )
+            .route(
+                "/api/integrations/{id}/revoke",
+                post(routes::revoke_integration),
+            )
+            // Admin: usage dashboard + telemetry dashboard link + saved call recordings.
+            .route("/api/admin/stats", get(stats::stats))
+            .route("/api/admin/telemetry", get(routes::telemetry_info))
+            .route("/api/admin/recordings", get(recordings::list))
+            .route(
+                "/api/admin/recordings/{call_id}",
+                delete(recordings::delete),
+            )
+            .route(
+                "/api/admin/recordings/{call_id}/{participant_id}",
+                get(recordings::serve),
+            )
+            // REST API for integrations (Bearer zk_… auth).
+            .route("/api/v1/me", get(api::me))
+            .route("/api/v1/rooms", get(api::rooms))
+            .route(
+                "/api/v1/rooms/{id}/messages",
+                get(api::get_messages).post(api::post_message),
+            )
+            .route("/api/v1/clients", post(api::create_client))
+            .route(
+                "/api/v1/clients/{client_id}/messages",
+                post(api::post_client_message),
+            )
+            .route(
+                "/api/v1/uploads",
+                post(api::upload).layer(DefaultBodyLimit::max(uploads::MAX_VIDEO_BYTES + 1024)),
+            )
+            .fallback(static_handler)
+            // INFO-level request spans so every HTTP request becomes an exported
+            // trace (the default is DEBUG, which the `info` filter drops — leaving
+            // only call spans). Makes telemetry visible from ordinary browsing.
+            .layer(TraceLayer::new_for_http().make_span_with(
                 tower_http::trace::DefaultMakeSpan::new().level(tracing::Level::INFO),
-            ),
-        )
-        // Self-contained compression (br/gzip/zstd) so the big wasm + JS/CSS go over
-        // the wire ~3× smaller without depending on the reverse proxy. The default
-        // predicate skips already-compressed types (images) and tiny bodies.
-        .layer(
-            // Skip already-compressed media (images are skipped by default; add
-            // video/audio) — compressing them wastes CPU and breaks range/streaming.
-            CompressionLayer::new().compress_when(
-                DefaultPredicate::new()
-                    .and(NotForContentType::const_new("video/"))
-                    .and(NotForContentType::const_new("audio/")),
-            ),
-        )
-        // Added AFTER the trace layer so they're NOT traced (avoid telemetry
-        // noise): the loopback health probe, and the GreptimeDB dashboard
-        // reverse-proxy — whose own /dashboard*,/v1/* traffic would otherwise echo
-        // back as traces. Mirrors GreptimeDB's native paths so the SPA resolves.
-        .route("/api/health", get(|| async { "ok" }))
-        .route("/api/version", get(routes::version))
-        .route("/dashboard", any(dashproxy::proxy))
-        .route("/dashboard/", any(dashproxy::proxy))
-        .route("/dashboard/{*path}", any(dashproxy::proxy))
-        .route("/v1/{*path}", any(dashproxy::proxy))
-        .with_state(state);
+            ))
+            // Self-contained compression (br/gzip/zstd) so the big wasm + JS/CSS go over
+            // the wire ~3× smaller without depending on the reverse proxy. The default
+            // predicate skips already-compressed types (images) and tiny bodies.
+            .layer(
+                // Skip already-compressed media (images are skipped by default; add
+                // video/audio) — compressing them wastes CPU and breaks range/streaming.
+                CompressionLayer::new().compress_when(
+                    DefaultPredicate::new()
+                        .and(NotForContentType::const_new("video/"))
+                        .and(NotForContentType::const_new("audio/")),
+                ),
+            )
+            // Added AFTER the trace layer so they're NOT traced (avoid telemetry
+            // noise): the loopback health probe, and the GreptimeDB dashboard
+            // reverse-proxy — whose own /dashboard*,/v1/* traffic would otherwise echo
+            // back as traces. Mirrors GreptimeDB's native paths so the SPA resolves.
+            .route("/api/health", get(|| async { "ok" }))
+            .route("/api/version", get(routes::version))
+            .route("/dashboard", any(dashproxy::proxy))
+            .route("/dashboard/", any(dashproxy::proxy))
+            .route("/dashboard/{*path}", any(dashproxy::proxy))
+            .route("/v1/{*path}", any(dashproxy::proxy))
+            .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     info!(
@@ -516,9 +520,15 @@ mod tests {
         // Version-fingerprinted wasm can be cached forever.
         assert!(cache_control_for("assets/dotlottie-player-0.75.0.wasm").contains("immutable"));
         // Stickers: a week (not fingerprinted, but stable).
-        assert_eq!(cache_control_for("assets/stickers/heart.json"), "public, max-age=604800");
+        assert_eq!(
+            cache_control_for("assets/stickers/heart.json"),
+            "public, max-age=604800"
+        );
         // Other assets (icons/manifest): a day.
-        assert_eq!(cache_control_for("assets/icon.svg"), "public, max-age=86400");
+        assert_eq!(
+            cache_control_for("assets/icon.svg"),
+            "public, max-age=86400"
+        );
         // Un-fingerprinted bundle → revalidate (never immutable, or a deploy sticks).
         assert_eq!(cache_control_for("main.js"), "no-cache");
         assert!(!cache_control_for("main.js").contains("immutable"));

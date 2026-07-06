@@ -100,6 +100,7 @@ struct MsgAttRow {
     width: Option<i64>,
     height: Option<i64>,
     has_thumb: bool,
+    has_alpha: bool,
 }
 
 /// Most recent messages in a room (oldest-first), each with its attachments (0–5).
@@ -166,7 +167,7 @@ pub async fn messages_before(
         .collect::<Vec<_>>()
         .join(",");
     let att_sql = format!(
-        "SELECT message_id, id, filename, content_type, size, width, height, has_thumb
+        "SELECT message_id, id, filename, content_type, size, width, height, has_thumb, has_alpha
          FROM attachments WHERE message_id IN ({placeholders}) ORDER BY id ASC"
     );
     // `placeholders` is `?1,?2,…` built from a count, not user input — safe.
@@ -187,6 +188,7 @@ pub async fn messages_before(
             width: a.width,
             height: a.height,
             has_thumb: a.has_thumb,
+            has_alpha: a.has_alpha,
         });
     }
 
@@ -197,8 +199,9 @@ pub async fn messages_before(
          FROM reactions r JOIN principals p ON p.id = r.principal_id
          WHERE r.message_id IN ({placeholders}) ORDER BY r.created_at ASC, r.principal_id ASC"
     );
-    let mut rq =
-        sqlx::query_as::<_, (String, String, String, Option<String>)>(sqlx::AssertSqlSafe(react_sql));
+    let mut rq = sqlx::query_as::<_, (String, String, String, Option<String>)>(
+        sqlx::AssertSqlSafe(react_sql),
+    );
     for id in &ids {
         rq = rq.bind(*id);
     }
@@ -209,7 +212,10 @@ pub async fn messages_before(
         let list = react_by_msg.entry(mid).or_default();
         match list.iter_mut().find(|r| r.emoji == emoji) {
             Some(r) => r.by.push(reactor),
-            None => list.push(Reaction { emoji, by: vec![reactor] }),
+            None => list.push(Reaction {
+                emoji,
+                by: vec![reactor],
+            }),
         }
     }
 
@@ -313,7 +319,10 @@ pub async fn toggle_reaction(
 
 /// All reactions on one message, grouped per emoji (first-added order). Used to
 /// broadcast the fresh set after a toggle.
-pub async fn reactions_for_message(reads: &SqlitePool, message_id: &str) -> sqlx::Result<Vec<Reaction>> {
+pub async fn reactions_for_message(
+    reads: &SqlitePool,
+    message_id: &str,
+) -> sqlx::Result<Vec<Reaction>> {
     let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(
         "SELECT r.emoji, r.principal_id, p.avatar FROM reactions r
          JOIN principals p ON p.id = r.principal_id
@@ -327,7 +336,10 @@ pub async fn reactions_for_message(reads: &SqlitePool, message_id: &str) -> sqlx
         let reactor = Reactor { id: pid, avatar };
         match out.iter_mut().find(|r| r.emoji == emoji) {
             Some(r) => r.by.push(reactor),
-            None => out.push(Reaction { emoji, by: vec![reactor] }),
+            None => out.push(Reaction {
+                emoji,
+                by: vec![reactor],
+            }),
         }
     }
     Ok(out)
@@ -377,8 +389,8 @@ pub async fn insert_attachment(
 ) -> sqlx::Result<()> {
     sqlx::query(
         "INSERT INTO attachments
-           (id, room_id, uploader_id, filename, content_type, size, width, height, has_thumb, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+           (id, room_id, uploader_id, filename, content_type, size, width, height, has_thumb, has_alpha, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
     )
     .bind(&a.id)
     .bind(room_id)
@@ -389,6 +401,7 @@ pub async fn insert_attachment(
     .bind(a.width)
     .bind(a.height)
     .bind(a.has_thumb)
+    .bind(a.has_alpha)
     .bind(created_at)
     .execute(write)
     .await?;
@@ -405,6 +418,7 @@ struct AttRow {
     width: Option<i64>,
     height: Option<i64>,
     has_thumb: bool,
+    has_alpha: bool,
 }
 
 const SAVED_COLS: &str =
@@ -466,7 +480,10 @@ pub async fn list_saved(reads: &SqlitePool, principal_id: &str) -> sqlx::Result<
 }
 
 /// Another principal's PUBLIC saved items (for their profile), newest first.
-pub async fn list_saved_public(reads: &SqlitePool, principal_id: &str) -> sqlx::Result<Vec<SavedItem>> {
+pub async fn list_saved_public(
+    reads: &SqlitePool,
+    principal_id: &str,
+) -> sqlx::Result<Vec<SavedItem>> {
     sqlx::query_as::<_, SavedItem>(sqlx::AssertSqlSafe(format!(
         "SELECT {SAVED_COLS} FROM saved_items WHERE principal_id = ?1 AND public = 1 ORDER BY created_at DESC, id DESC"
     )))
@@ -477,10 +494,11 @@ pub async fn list_saved_public(reads: &SqlitePool, principal_id: &str) -> sqlx::
 
 /// A saved item with its owner's id (for serve/op auth). None if it doesn't exist.
 pub async fn get_saved(reads: &SqlitePool, id: &str) -> sqlx::Result<Option<(String, SavedItem)>> {
-    let owner: Option<(String,)> = sqlx::query_as("SELECT principal_id FROM saved_items WHERE id = ?1")
-        .bind(id)
-        .fetch_optional(reads)
-        .await?;
+    let owner: Option<(String,)> =
+        sqlx::query_as("SELECT principal_id FROM saved_items WHERE id = ?1")
+            .bind(id)
+            .fetch_optional(reads)
+            .await?;
     let Some((owner,)) = owner else {
         return Ok(None);
     };
@@ -526,7 +544,7 @@ pub async fn lookup_attachment(
     id: &str,
 ) -> sqlx::Result<Option<(String, Attachment)>> {
     let row = sqlx::query_as::<_, AttRow>(
-        "SELECT room_id, id, filename, content_type, size, width, height, has_thumb
+        "SELECT room_id, id, filename, content_type, size, width, height, has_thumb, has_alpha
          FROM attachments WHERE id = ?1",
     )
     .bind(id)
@@ -543,6 +561,7 @@ pub async fn lookup_attachment(
                 width: r.width,
                 height: r.height,
                 has_thumb: r.has_thumb,
+                has_alpha: r.has_alpha,
             },
         )
     }))
@@ -701,7 +720,9 @@ pub async fn tokens_for_principals(
         .collect::<Vec<_>>()
         .join(",");
     // `placeholders` is `?1,?2,…` from a count, not user input — safe.
-    let sql = format!("SELECT token, principal_id FROM push_tokens WHERE principal_id IN ({placeholders})");
+    let sql = format!(
+        "SELECT token, principal_id FROM push_tokens WHERE principal_id IN ({placeholders})"
+    );
     let mut q = sqlx::query_as::<_, (String, String)>(sqlx::AssertSqlSafe(sql));
     for id in ids {
         q = q.bind(id);
