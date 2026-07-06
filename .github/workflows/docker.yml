@@ -64,14 +64,40 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # Which parts changed? The native apps (desktop/android) bundle only app/ (the
+  # Tauri shell + the static app/landing) and load the real UI from the server at
+  # runtime — they do NOT embed the backend or the main frontend (frontendDist is
+  # ../landing). So a backend- or frontend-only push shouldn't rebuild them. This
+  # gates the native jobs on app/** (+ this workflow), so they skip otherwise.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      native: ${{ steps.filter.outputs.native }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            native:
+              - 'app/**'
+              - '.github/workflows/docker.yml'
+
   # Desktop apps — built on their NATIVE runners (no Tauri cross-compilation).
   # Runs AFTER the backend image so it never slows that build; skipped on PRs.
   # macOS is OFF here on purpose: GitHub bills macOS runners at 10× minutes, and
   # we build the Mac app locally (`make app-mac`). Add `macos-latest` back to the
   # matrix to re-enable it. Installers are uploaded as artifacts (signing later).
   desktop:
-    needs: build-and-push
-    if: github.event_name != 'pull_request'
+    needs: [build-and-push, changes]
+    if: >-
+      github.event_name != 'pull_request' &&
+      (needs.changes.outputs.native == 'true' ||
+       startsWith(github.ref, 'refs/tags/v') ||
+       github.event_name == 'workflow_dispatch')
     strategy:
       fail-fast: false
       matrix:
@@ -109,8 +135,12 @@ jobs:
   # runner). Runs after the backend image too. Produces a DEBUG-signed .apk that
   # sideloads immediately; a Play-Store .aab needs a release keystore (later).
   android:
-    needs: build-and-push
-    if: github.event_name != 'pull_request'
+    needs: [build-and-push, changes]
+    if: >-
+      github.event_name != 'pull_request' &&
+      (needs.changes.outputs.native == 'true' ||
+       startsWith(github.ref, 'refs/tags/v') ||
+       github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     env:
       NDK_VERSION: "27.2.12479018"
@@ -209,7 +239,11 @@ jobs:
   # later by pushing a `vX.Y.Z` tag (would need its own job).
   release:
     needs: [desktop, android]
-    if: github.ref == 'refs/heads/main'
+    # Only when at least one native app actually built (skipped on backend-only
+    # pushes). !cancelled() lets this evaluate even though needs may be skipped.
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' &&
+      (needs.desktop.result == 'success' || needs.android.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write # create/update the Release
