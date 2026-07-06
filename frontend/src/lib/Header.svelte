@@ -15,7 +15,7 @@
     RELEASE_API,
     type ReleaseAsset,
   } from "./util/download";
-  import { isApp } from "./platform";
+  import { isApp, openExternal } from "./platform";
   import { soundMuted, toggleSound } from "./notify";
   import Connections from "./Connections.svelte";
   import Avatar from "./Avatar.svelte";
@@ -434,9 +434,15 @@
            it works in the browser and inside the app. -->
       <a
         href={downloadUrl}
-        target="_blank"
         rel="noopener noreferrer"
-        onclick={() => (menuOpen = false)}
+        onclick={(e) => {
+          // The app webview swallows target=_blank, so hand the release URL to the
+          // system browser (which then downloads the APK). In a plain browser
+          // openExternal falls back to window.open — same as before.
+          e.preventDefault();
+          menuOpen = false;
+          openExternal(downloadUrl);
+        }}
         class="block cursor-pointer rounded-md py-2 text-center font-mono text-[0.74rem] uppercase tracking-[0.08em] text-muted hover:text-text"
       >
         {$t("downloadApp")}{#if OS_NAME[os]} · {OS_NAME[os]}{/if}
