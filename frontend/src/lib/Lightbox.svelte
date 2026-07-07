@@ -30,6 +30,7 @@
   let gesturing = false; // true mid-drag/pinch → drop the transform transition
   let imgEl: HTMLImageElement | undefined;
   const MAX_ZOOM = 5;
+  const MIN_ZOOM = 0.4; // allow zooming OUT below fit so a full-screen photo can be pulled back
 
   const pointers = new Map<number, { x: number; y: number }>();
   let startDist = 0;
@@ -48,8 +49,11 @@
   // clear instead of jamming against the boundary.
   function clampPan(): void {
     if (!imgEl) return;
-    const maxX = (imgEl.clientWidth * (zoom - 1)) / 2 + imgEl.clientWidth * 0.2;
-    const maxY = (imgEl.clientHeight * (zoom - 1)) / 2 + imgEl.clientHeight * 0.2;
+    // Half the extra size when zoomed in, plus a constant margin so you can always
+    // drag the image around a bit (even at/below fit — that's the "move" gesture).
+    const margin = 0.35;
+    const maxX = Math.max(0, (imgEl.clientWidth * (zoom - 1)) / 2) + imgEl.clientWidth * margin;
+    const maxY = Math.max(0, (imgEl.clientHeight * (zoom - 1)) / 2) + imgEl.clientHeight * margin;
     tx = Math.min(maxX, Math.max(-maxX, tx));
     ty = Math.min(maxY, Math.max(-maxY, ty));
   }
@@ -63,7 +67,9 @@
       startZoom = zoom;
       panStart = null;
       gesturing = true;
-    } else if (pointers.size === 1 && zoom > 1) {
+    } else if (pointers.size === 1 && (zoom > 1 || e.pointerType === "mouse")) {
+      // Drag to move: always with the mouse (touch keeps single-finger swipe for
+      // paging when not zoomed in).
       panStart = { x: e.clientX, y: e.clientY, tx, ty };
       gesturing = true;
     }
@@ -75,9 +81,9 @@
     if (pointers.size === 2 && startDist > 0) {
       const [a, b] = [...pointers.values()];
       const dist = Math.hypot(a.x - b.x, a.y - b.y);
-      zoom = Math.min(MAX_ZOOM, Math.max(1, startZoom * (dist / startDist)));
+      zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, startZoom * (dist / startDist)));
       clampPan();
-    } else if (panStart && zoom > 1) {
+    } else if (panStart) {
       tx = panStart.tx + (e.clientX - panStart.x);
       ty = panStart.ty + (e.clientY - panStart.y);
       clampPan();
@@ -91,20 +97,25 @@
       panStart = null;
       gesturing = false;
     }
-    if (zoom <= 1.01) resetZoom(); // snap back to a clean fit
+    // Snap the SCALE back to a clean 1× when we're right at it, but keep the
+    // panned position — don't undo a deliberate zoom-out or a drag.
+    if (Math.abs(zoom - 1) < 0.04) {
+      zoom = 1;
+      clampPan();
+    }
   }
 
   // Desktop wheel zoom, centered.
   function onWheel(e: WheelEvent): void {
     e.preventDefault();
-    zoom = Math.min(MAX_ZOOM, Math.max(1, zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
-    if (zoom === 1) resetZoom();
-    else clampPan();
+    zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+    if (Math.abs(zoom - 1) < 0.02) zoom = 1;
+    clampPan();
   }
 
   // Double-tap / double-click toggles between fit and a 2.5× look.
   function onDblClick(): void {
-    if (zoom > 1) resetZoom();
+    if (zoom !== 1) resetZoom();
     else zoom = 2.5;
   }
 
@@ -222,7 +233,7 @@
     <div
       role="group"
       aria-label={current.filename}
-      class="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4 sm:p-8"
+      class="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 sm:p-8"
       ontouchstart={onTouchStart}
       ontouchend={onTouchEnd}
     >
@@ -251,10 +262,9 @@
             onpointercancel={onImgPointerUp}
             onwheel={onWheel}
             ondblclick={onDblClick}
-            class="pointer-events-auto flex max-h-full max-w-full touch-none items-center justify-center {zoom >
-            1
-              ? 'cursor-grab'
-              : 'cursor-zoom-in'}"
+            class="pointer-events-auto flex size-full touch-none items-center justify-center {gesturing
+              ? 'cursor-grabbing'
+              : 'cursor-grab'}"
           >
             <img
               bind:this={imgEl}
