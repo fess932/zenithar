@@ -14,6 +14,10 @@ export interface Attachment {
   has_thumb: boolean;
   // Transparent PNG/WebP → rendered frameless (no border/surface behind it).
   has_alpha?: boolean;
+  // A sticker (pack item) → rendered bare: no frame, autoplay, no video controls.
+  is_sticker?: boolean;
+  // If from a pack, its share slug — lets the recipient add the whole pack.
+  pack_slug?: string | null;
 }
 
 export interface ReplyPreview {

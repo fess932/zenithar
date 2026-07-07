@@ -129,6 +129,8 @@ pub async fn ingest(state: &AppState, p: &Principal, mut multipart: Multipart) -
         height: prepared.height,
         has_thumb: prepared.has_thumb,
         has_alpha: prepared.has_alpha,
+        is_sticker: false,
+        pack_slug: None,
     };
 
     if db::insert_attachment(&state.db, &att, &room_id, &p.id, now_millis())
@@ -204,21 +206,23 @@ pub async fn upload_saved(
         width: prepared.width,
         height: prepared.height,
         has_thumb: prepared.has_thumb,
+        has_alpha: prepared.has_alpha,
+        is_sticker: false,
         public: false,
         created_at: now_millis(),
     };
-    match db::insert_saved(&state.db, &item, &p.id, None).await {
+    match db::insert_saved(&state.db, &item, &p.id, None, None).await {
         Ok(()) => Json(item).into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 
-struct Prepared {
-    content_type: String,
-    width: Option<i64>,
-    height: Option<i64>,
-    has_thumb: bool,
-    has_alpha: bool,
+pub(crate) struct Prepared {
+    pub(crate) content_type: String,
+    pub(crate) width: Option<i64>,
+    pub(crate) height: Option<i64>,
+    pub(crate) has_thumb: bool,
+    pub(crate) has_alpha: bool,
 }
 
 /// Decode `bytes`, baking in any EXIF orientation so the pixels match how a
@@ -265,7 +269,7 @@ fn downscale(img: &image::DynamicImage, max: u32) -> Option<image::DynamicImage>
 /// Store the original; if it decodes as an image, also store a JPEG thumbnail, a
 /// downscaled WebP viewer preview (large images), and record its dimensions +
 /// whether it has transparency. Runs on a blocking thread.
-fn process_and_store(
+pub(crate) fn process_and_store(
     storage: &dyn Storage,
     id: &str,
     bytes: Vec<u8>,

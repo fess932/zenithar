@@ -14,6 +14,13 @@ pub struct Attachment {
     /// Image carries an alpha channel (transparent PNG/WebP) → render frameless.
     #[serde(default)]
     pub has_alpha: bool,
+    /// A sticker (pack item) → render bare: no frame, autoplay, no video controls.
+    #[serde(default)]
+    pub is_sticker: bool,
+    /// If this sticker came from a pack, its pack's share slug — lets the recipient
+    /// add the whole pack. None for ordinary (non-pack) attachments.
+    #[serde(default)]
+    pub pack_slug: Option<String>,
 }
 
 /// A "сохранёнка" — one image in a user's private saved collection. Holds its own
@@ -29,8 +36,37 @@ pub struct SavedItem {
     pub width: Option<i64>,
     pub height: Option<i64>,
     pub has_thumb: bool,
+    #[serde(default)]
+    pub has_alpha: bool,
+    #[serde(default)]
+    pub is_sticker: bool,
     pub public: bool,
     pub created_at: i64,
+}
+
+/// A sticker/emoji pack — a named group of saved_items. Shared by `share_slug`:
+/// anyone with the link copies the whole pack (its blobs) into their collection.
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct SavedPack {
+    pub id: String,
+    pub owner_id: String,
+    pub name: String,
+    /// 'sticker' | 'gif' | 'saved' — which sub-list the pack shows under.
+    pub kind: String,
+    /// Exposed on the owner's profile for anyone to view + add.
+    #[serde(default)]
+    pub public: bool,
+    pub cover_item_id: Option<String>,
+    pub share_slug: String,
+    pub created_at: i64,
+}
+
+/// A pack with its member items — the shape the pack list/share view returns.
+#[derive(Clone, Debug, Serialize)]
+pub struct PackWithItems {
+    #[serde(flatten)]
+    pub pack: SavedPack,
+    pub items: Vec<SavedItem>,
 }
 
 /// A compact preview of the message a reply quotes (Telegram-style). Derived at

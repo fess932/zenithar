@@ -40,6 +40,12 @@ webp = "0.3"
 # pure Rust, several× faster than the `image` crate's resize. The `image` feature
 # lets it resize `DynamicImage` buffers directly.
 fast_image_resize = { version = "5", features = ["image"] }
+# Unpack imported sticker packs: `.wastickers`/`.zip` are ZIP archives, `.tgs`
+# (Telegram animated stickers) are gzipped Lottie JSON. Pure-Rust deflate backend
+# (miniz_oxide) keeps us OpenSSL/C-free. `zip` pulls flate2; we also use flate2
+# directly to gunzip a bare `.tgs`.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+flate2 = "1"
 # WebRTC voice calls — sans-IO `rtc` crate. The server is the peer in the media
 # path (ICE/DTLS/SRTP/RTP terminate here); we drive the I/O loop ourselves, which
 # makes the forwarding logic unit-testable and gives full ICE/socket control.

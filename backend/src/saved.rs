@@ -77,10 +77,12 @@ pub async fn save_from(
         width: src.width,
         height: src.height,
         has_thumb: src.has_thumb,
+        has_alpha: src.has_alpha,
+        is_sticker: src.is_sticker,
         public: false,
         created_at: now_millis(),
     };
-    match db::insert_saved(&state.db, &item, &p.id, Some(&att_id)).await {
+    match db::insert_saved(&state.db, &item, &p.id, Some(&att_id), None).await {
         Ok(()) => Json(item).into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
@@ -172,6 +174,11 @@ pub async fn attach(
     {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
+    // If this item belongs to a pack, carry the pack's share slug so recipients
+    // can add the whole pack from the sticker.
+    let pack_slug = db::saved_item_pack_slug(&state.reads, &id)
+        .await
+        .unwrap_or(None);
     let att = Attachment {
         id: new_id,
         filename: item.filename,
@@ -180,8 +187,9 @@ pub async fn attach(
         width: item.width,
         height: item.height,
         has_thumb: item.has_thumb,
-        // Saved items are stored as opaque previews — no alpha flag to carry.
-        has_alpha: false,
+        has_alpha: item.has_alpha,
+        is_sticker: item.is_sticker,
+        pack_slug,
     };
     match db::insert_attachment(&state.db, &att, &body.room_id, &p.id, now_millis()).await {
         Ok(()) => Json(att).into_response(),
@@ -243,7 +251,12 @@ async fn serve_inner(state: AppState, p: Principal, id: &str, thumb: bool) -> Re
 }
 
 /// Copy a Storage blob (and its thumbnail) from `src` key to `dst` key.
-async fn copy_blob(state: &AppState, src: &str, dst: &str, has_thumb: bool) -> std::io::Result<()> {
+pub(crate) async fn copy_blob(
+    state: &AppState,
+    src: &str,
+    dst: &str,
+    has_thumb: bool,
+) -> std::io::Result<()> {
     let storage = state.storage.clone();
     let (src, dst) = (src.to_string(), dst.to_string());
     tokio::task::spawn_blocking(move || -> std::io::Result<()> {

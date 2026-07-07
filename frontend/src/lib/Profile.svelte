@@ -15,6 +15,17 @@
     type SavedItem,
   } from "./saved";
   import { lightbox, openGallery, type LightboxItem } from "./lightbox";
+  import PacksPanel from "./PacksPanel.svelte";
+  import Sticker from "./Sticker.svelte";
+  import {
+    listPacks,
+    listPacksOf,
+    openAddPack,
+    isLottie,
+    isVideoSticker,
+    sharedItemUrl,
+    type Pack,
+  } from "./packs";
   import type { ProfileTarget } from "./profile";
 
   export let target: ProfileTarget;
@@ -54,10 +65,17 @@
     }
   }
 
+  // Your own packs (managed) or the target's public ones (view + add).
+  let packs: Pack[] = [];
+  async function reloadPacks(): Promise<void> {
+    packs = mine ? await listPacks() : await listPacksOf(target.id);
+  }
+
   onMount(load);
   async function load(): Promise<void> {
     loading = true;
     items = mine ? await listSaved() : await listSavedOf(target.id);
+    await reloadPacks();
     loading = false;
   }
 
@@ -170,7 +188,7 @@
                 <span class="pointer-events-none absolute inset-0 grid place-items-center text-white/90">▶</span>
               {:else}
                 <img
-                  src={it.has_thumb ? savedThumb(it.id) : savedUrl(it.id)}
+                  src={it.has_thumb && !it.has_alpha ? savedThumb(it.id) : savedUrl(it.id)}
                   alt={it.filename}
                   loading="lazy"
                   class="size-full object-cover"
@@ -212,4 +230,56 @@
       />
     {/if}
   </div>
+
+  {#if mine}
+    <!-- Packs (stickers / gifs / saved sub-lists) — import, re-kind, share, delete. -->
+    <div class="px-3 pb-[calc(1.5rem+env(safe-area-inset-bottom))] sm:px-5">
+      <div class="mb-2 px-1 font-mono text-[0.72rem] uppercase tracking-[0.1em] text-muted">
+        {$t("packs")}
+      </div>
+      <PacksPanel {packs} onChanged={reloadPacks} />
+    </div>
+  {:else if packs.length > 0}
+    <!-- Another user's PUBLIC packs — preview + add to your own collection. -->
+    <div class="px-3 pb-[calc(1.5rem+env(safe-area-inset-bottom))] sm:px-5">
+      <div class="mb-2 px-1 font-mono text-[0.72rem] uppercase tracking-[0.1em] text-muted">
+        {$t("packs")}
+      </div>
+      <div class="flex flex-col gap-3">
+        {#each packs as p (p.id)}
+          <section class="flex flex-col gap-1">
+            <header class="flex items-center gap-1.5 px-0.5">
+              <span class="truncate font-mono text-[0.72rem] text-you">{p.name}</span>
+              <span class="font-mono text-[0.66rem] text-muted">{p.items.length}</span>
+              <button
+                type="button"
+                onclick={() => openAddPack(p.share_slug)}
+                class="ml-auto rounded-full border border-beacon px-2 py-0.5 font-mono text-[0.64rem] text-beacon hover:bg-beacon hover:text-[#1a1206]"
+              >
+                + {$t("addPack")}
+              </button>
+            </header>
+            <div class="grid grid-cols-[repeat(auto-fill,minmax(3.5rem,1fr))] gap-1">
+              {#each p.items.slice(0, 12) as it (it.id)}
+                <div class="grid aspect-square place-items-center rounded p-0.5">
+                  {#if isLottie(it.content_type)}
+                    <Sticker src={sharedItemUrl(p.share_slug, it.id)} format="lottie" size={52} />
+                  {:else if isVideoSticker(it.content_type)}
+                    <Sticker src={sharedItemUrl(p.share_slug, it.id)} format="webm" size={52} />
+                  {:else}
+                    <img
+                      src={sharedItemUrl(p.share_slug, it.id)}
+                      alt={it.filename}
+                      loading="lazy"
+                      class="max-h-full max-w-full object-contain"
+                    />
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          </section>
+        {/each}
+      </div>
+    </div>
+  {/if}
 </div>

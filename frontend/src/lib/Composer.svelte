@@ -8,6 +8,8 @@
   import Sticker from "./Sticker.svelte";
   import { STICKERS } from "./stickers";
   import { listSaved, sendSaved, uploadSaved, savedThumb, savedUrl, type SavedItem } from "./saved";
+  import PacksPanel from "./PacksPanel.svelte";
+  import { listPacks, type Pack } from "./packs";
 
   const MAX_ATTACH = 5;
 
@@ -15,7 +17,7 @@
   let pending: Attachment[] = [];
   let uploading = false;
   let showEmoji = false;
-  // Picker tabs. GIFs is a placeholder for now — UI is ready, content TBD.
+  // Picker tabs. Stickers/GIFs/Saved each host the matching pack sub-lists.
   let pickerTab: "emoji" | "stickers" | "gifs" | "saved" = "emoji";
 
   // Saved items ("сохранёнки"), loaded lazily when the tab is first opened.
@@ -29,6 +31,23 @@
     loadingSaved = false;
   }
   $: if (showEmoji && pickerTab === "saved" && savedItems === null && !loadingSaved) void loadSaved();
+
+  // Packs (sticker/gif/saved sub-lists), loaded once when the picker first opens.
+  let packs: Pack[] | null = null;
+  async function loadPacks(): Promise<void> {
+    packs = await listPacks();
+  }
+  // After an import the server may file the pack under a different kind (detected
+  // from its contents) — reload and jump to that tab so it's visible.
+  async function onPacksChanged(pack?: Pack): Promise<void> {
+    await loadPacks();
+    if (pack)
+      pickerTab = pack.kind === "sticker" ? "stickers" : pack.kind === "gif" ? "gifs" : "saved";
+  }
+  $: if (showEmoji && packs === null) void loadPacks();
+  $: stickerPacks = (packs ?? []).filter((p) => p.kind === "sticker");
+  $: gifPacks = (packs ?? []).filter((p) => p.kind === "gif");
+  $: savedPacks = (packs ?? []).filter((p) => p.kind === "saved");
 
   function pickSaved(id: string): void {
     void sendSaved(id);
@@ -427,6 +446,11 @@
               </button>
             {/each}
           </div>
+          <div class="mt-2 border-t border-line pt-2">
+            <PacksPanel packs={stickerPacks} onSend={pickSaved} onChanged={onPacksChanged} />
+          </div>
+        {:else if pickerTab === "gifs"}
+          <PacksPanel packs={gifPacks} onSend={pickSaved} onChanged={onPacksChanged} />
         {:else if pickerTab === "saved"}
           <div class="grid grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-1">
             <!-- Upload tile -->
@@ -457,7 +481,7 @@
                   <span class="pointer-events-none absolute inset-0 grid place-items-center text-white/90">▶</span>
                 {:else}
                   <img
-                    src={it.has_thumb ? savedThumb(it.id) : savedUrl(it.id)}
+                    src={it.has_thumb && !it.has_alpha ? savedThumb(it.id) : savedUrl(it.id)}
                     alt={it.filename}
                     loading="lazy"
                     class="size-full object-cover"
@@ -469,8 +493,9 @@
           {#if savedItems !== null && savedItems.length === 0}
             <p class="px-1 py-3 font-mono text-[0.74rem] leading-snug text-muted">{$t("noSaved")}</p>
           {/if}
-        {:else}
-          <p class="grid place-items-center py-9 font-mono text-[0.78rem] text-muted">{$t("comingSoon")}</p>
+          <div class="mt-2 border-t border-line pt-2">
+            <PacksPanel packs={savedPacks} onSend={pickSaved} onChanged={onPacksChanged} />
+          </div>
         {/if}
       </div>
     </div>

@@ -6,6 +6,7 @@
   import Avatar from "./Avatar.svelte";
   import Sticker from "./Sticker.svelte";
   import { sticker } from "./stickers";
+  import { isLottie, isVideoSticker } from "./packs";
   import { openLightbox } from "./lightbox";
   import { openMessageMenu } from "./messageMenu";
   import { openProfile } from "./profile";
@@ -19,15 +20,16 @@
   // A sticker message renders the bundled animation instead of a text bubble.
   $: stickerDef = m.sticker ? sticker(m.sticker) : undefined;
 
-  // A lone transparent image (no text/reply) is effectively a sticker — render it
-  // bare (no bubble chrome or background), like the animated-emoji path.
+  // A lone transparent image OR a Lottie animation (no text/reply) is effectively
+  // a sticker — render it bare (no bubble chrome/background), like the emoji path.
   $: stickerImage =
     !m.sticker &&
     !m.body.trim() &&
     !m.reply_to &&
     m.attachments.length === 1 &&
-    m.attachments[0].content_type.startsWith("image/") &&
-    !!m.attachments[0].has_alpha;
+    (!!m.attachments[0].is_sticker ||
+      (m.attachments[0].content_type.startsWith("image/") && !!m.attachments[0].has_alpha) ||
+      isLottie(m.attachments[0].content_type));
   // First message of an author's run: only then do we print the name + add the
   // group gap. Continuation lines tuck under it. Computed by the parent loop.
   export let firstInGroup = true;
@@ -135,7 +137,11 @@
     {#if m.attachments.length > 0}
       <div class="mt-1 flex flex-wrap items-start gap-2">
         {#each m.attachments as a (a.id)}
-          {#if a.content_type.startsWith("image/")}
+          {#if isLottie(a.content_type)}
+            <Sticker src={orig(a.id)} format="lottie" alt={a.filename} size={112} />
+          {:else if a.is_sticker && isVideoSticker(a.content_type)}
+            <Sticker src={orig(a.id)} format="webm" alt={a.filename} size={112} />
+          {:else if a.content_type.startsWith("image/")}
             <!-- Transparent images (stickers) render frameless — no border or
                  surface behind them — and uncropped, so their shape reads true. -->
             <button
@@ -229,18 +235,30 @@
      just the image + a small time. -->
 {#snippet imageStickerBlock()}
   {@const a = m.attachments[0]}
-  <button
-    type="button"
-    onclick={() => openLightbox(a.id)}
-    class="block cursor-zoom-in transition hover:brightness-110 active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100"
-  >
-    <img
-      src={orig(a.id)}
-      alt={a.filename}
-      loading="lazy"
-      class="max-h-52 max-w-[13rem] object-contain"
-    />
-  </button>
+  {#if isLottie(a.content_type)}
+    <!-- Animated (Lottie) sticker: play it inline, no zoom/lightbox. -->
+    <div class="block">
+      <Sticker src={orig(a.id)} format="lottie" alt={a.filename} size={144} />
+    </div>
+  {:else if isVideoSticker(a.content_type)}
+    <!-- WebM video sticker: autoplay/loop, bare, no controls. -->
+    <div class="block">
+      <Sticker src={orig(a.id)} format="webm" alt={a.filename} size={144} />
+    </div>
+  {:else}
+    <button
+      type="button"
+      onclick={() => openLightbox(a.id)}
+      class="block cursor-zoom-in transition hover:brightness-110 active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100"
+    >
+      <img
+        src={orig(a.id)}
+        alt={a.filename}
+        loading="lazy"
+        class="max-h-52 max-w-[13rem] object-contain"
+      />
+    </button>
+  {/if}
   <span class="mt-0.5 font-mono text-[0.6rem] text-muted" title={fullTime(m.created_at)}>
     {fmtTime(m.created_at)}{#if mine}<span class="ml-0.5 {readByOthers ? 'text-sky-400' : ''}"
         >{readByOthers ? "✓✓" : "✓"}</span

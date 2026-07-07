@@ -7,7 +7,7 @@ use sqlx::SqlitePool;
 use ulid::Ulid;
 
 use crate::models::{
-    Attachment, ChatMessage, Reaction, Reactor, ReplyPreview, RoomSummary, SavedItem,
+    Attachment, ChatMessage, Reaction, Reactor, ReplyPreview, RoomSummary, SavedItem, SavedPack,
 };
 
 /// The single-writer pool (max 1 connection). SQLite serialises writes, so we
@@ -101,6 +101,8 @@ struct MsgAttRow {
     height: Option<i64>,
     has_thumb: bool,
     has_alpha: bool,
+    is_sticker: bool,
+    pack_slug: Option<String>,
 }
 
 /// Most recent messages in a room (oldest-first), each with its attachments (0–5).
@@ -167,7 +169,7 @@ pub async fn messages_before(
         .collect::<Vec<_>>()
         .join(",");
     let att_sql = format!(
-        "SELECT message_id, id, filename, content_type, size, width, height, has_thumb, has_alpha
+        "SELECT message_id, id, filename, content_type, size, width, height, has_thumb, has_alpha, is_sticker, pack_slug
          FROM attachments WHERE message_id IN ({placeholders}) ORDER BY id ASC"
     );
     // `placeholders` is `?1,?2,…` built from a count, not user input — safe.
@@ -189,6 +191,8 @@ pub async fn messages_before(
             height: a.height,
             has_thumb: a.has_thumb,
             has_alpha: a.has_alpha,
+            is_sticker: a.is_sticker,
+            pack_slug: a.pack_slug,
         });
     }
 
@@ -389,8 +393,8 @@ pub async fn insert_attachment(
 ) -> sqlx::Result<()> {
     sqlx::query(
         "INSERT INTO attachments
-           (id, room_id, uploader_id, filename, content_type, size, width, height, has_thumb, has_alpha, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+           (id, room_id, uploader_id, filename, content_type, size, width, height, has_thumb, has_alpha, is_sticker, pack_slug, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
     )
     .bind(&a.id)
     .bind(room_id)
@@ -402,6 +406,8 @@ pub async fn insert_attachment(
     .bind(a.height)
     .bind(a.has_thumb)
     .bind(a.has_alpha)
+    .bind(a.is_sticker)
+    .bind(&a.pack_slug)
     .bind(created_at)
     .execute(write)
     .await?;
@@ -419,10 +425,12 @@ struct AttRow {
     height: Option<i64>,
     has_thumb: bool,
     has_alpha: bool,
+    is_sticker: bool,
+    pack_slug: Option<String>,
 }
 
 const SAVED_COLS: &str =
-    "id, filename, content_type, size, width, height, has_thumb, public, created_at";
+    "id, filename, content_type, size, width, height, has_thumb, has_alpha, is_sticker, public, created_at";
 
 /// Insert a saved item for a principal (its blob is already in Storage under `id`).
 /// `source_id` is the message attachment it was copied from (for dedup), or None.
@@ -431,11 +439,12 @@ pub async fn insert_saved(
     item: &SavedItem,
     principal_id: &str,
     source_id: Option<&str>,
+    pack_id: Option<&str>,
 ) -> sqlx::Result<()> {
     sqlx::query(
         "INSERT INTO saved_items
-           (id, principal_id, filename, content_type, size, width, height, has_thumb, public, created_at, source_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+           (id, principal_id, filename, content_type, size, width, height, has_thumb, has_alpha, is_sticker, public, created_at, source_id, pack_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
     )
     .bind(&item.id)
     .bind(principal_id)
@@ -445,9 +454,12 @@ pub async fn insert_saved(
     .bind(item.width)
     .bind(item.height)
     .bind(item.has_thumb)
+    .bind(item.has_alpha)
+    .bind(item.is_sticker)
     .bind(item.public)
     .bind(item.created_at)
     .bind(source_id)
+    .bind(pack_id)
     .execute(write)
     .await?;
     Ok(())
@@ -472,7 +484,7 @@ pub async fn find_saved_by_source(
 /// A principal's own saved items, newest first.
 pub async fn list_saved(reads: &SqlitePool, principal_id: &str) -> sqlx::Result<Vec<SavedItem>> {
     sqlx::query_as::<_, SavedItem>(sqlx::AssertSqlSafe(format!(
-        "SELECT {SAVED_COLS} FROM saved_items WHERE principal_id = ?1 ORDER BY created_at DESC, id DESC"
+        "SELECT {SAVED_COLS} FROM saved_items WHERE principal_id = ?1 AND pack_id IS NULL ORDER BY created_at DESC, id DESC"
     )))
     .bind(principal_id)
     .fetch_all(reads)
@@ -485,7 +497,7 @@ pub async fn list_saved_public(
     principal_id: &str,
 ) -> sqlx::Result<Vec<SavedItem>> {
     sqlx::query_as::<_, SavedItem>(sqlx::AssertSqlSafe(format!(
-        "SELECT {SAVED_COLS} FROM saved_items WHERE principal_id = ?1 AND public = 1 ORDER BY created_at DESC, id DESC"
+        "SELECT {SAVED_COLS} FROM saved_items WHERE principal_id = ?1 AND public = 1 AND pack_id IS NULL ORDER BY created_at DESC, id DESC"
     )))
     .bind(principal_id)
     .fetch_all(reads)
@@ -538,13 +550,220 @@ pub async fn delete_saved(write: &SqlitePool, id: &str, principal_id: &str) -> s
     Ok(r.rows_affected() > 0)
 }
 
+// ---- Sticker/emoji packs ---------------------------------------------------
+
+const PACK_COLS: &str = "id, owner_id, name, kind, public, cover_item_id, share_slug, created_at";
+
+/// Create an (initially empty) pack.
+pub async fn insert_pack(write: &SqlitePool, pack: &SavedPack) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO saved_packs (id, owner_id, name, kind, public, cover_item_id, share_slug, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+    )
+    .bind(&pack.id)
+    .bind(&pack.owner_id)
+    .bind(&pack.name)
+    .bind(&pack.kind)
+    .bind(pack.public)
+    .bind(&pack.cover_item_id)
+    .bind(&pack.share_slug)
+    .bind(pack.created_at)
+    .execute(write)
+    .await?;
+    Ok(())
+}
+
+/// A principal's own packs (newest first).
+pub async fn list_packs(reads: &SqlitePool, owner_id: &str) -> sqlx::Result<Vec<SavedPack>> {
+    sqlx::query_as::<_, SavedPack>(sqlx::AssertSqlSafe(format!(
+        "SELECT {PACK_COLS} FROM saved_packs WHERE owner_id = ?1 ORDER BY created_at DESC, id DESC"
+    )))
+    .bind(owner_id)
+    .fetch_all(reads)
+    .await
+}
+
+/// Another principal's PUBLIC packs (for their profile), newest first.
+pub async fn list_packs_public(reads: &SqlitePool, owner_id: &str) -> sqlx::Result<Vec<SavedPack>> {
+    sqlx::query_as::<_, SavedPack>(sqlx::AssertSqlSafe(format!(
+        "SELECT {PACK_COLS} FROM saved_packs WHERE owner_id = ?1 AND public = 1 ORDER BY created_at DESC, id DESC"
+    )))
+    .bind(owner_id)
+    .fetch_all(reads)
+    .await
+}
+
+/// Flip a pack's public flag (owner only). Returns whether a row changed.
+pub async fn set_pack_public(
+    write: &SqlitePool,
+    id: &str,
+    owner_id: &str,
+    public: bool,
+) -> sqlx::Result<bool> {
+    let r = sqlx::query("UPDATE saved_packs SET public = ?3 WHERE id = ?1 AND owner_id = ?2")
+        .bind(id)
+        .bind(owner_id)
+        .bind(public)
+        .execute(write)
+        .await?;
+    Ok(r.rows_affected() > 0)
+}
+
+/// The share slug of the pack a saved item belongs to, if any (used to stamp a
+/// sticker's attachment so recipients can add its pack).
+pub async fn saved_item_pack_slug(
+    reads: &SqlitePool,
+    item_id: &str,
+) -> sqlx::Result<Option<String>> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT p.share_slug FROM saved_items i
+           JOIN saved_packs p ON p.id = i.pack_id
+         WHERE i.id = ?1",
+    )
+    .bind(item_id)
+    .fetch_optional(reads)
+    .await?;
+    Ok(row.map(|(s,)| s))
+}
+
+/// A pack by id (for owner-scoped ops); None if it doesn't exist.
+pub async fn get_pack(reads: &SqlitePool, id: &str) -> sqlx::Result<Option<SavedPack>> {
+    sqlx::query_as::<_, SavedPack>(sqlx::AssertSqlSafe(format!(
+        "SELECT {PACK_COLS} FROM saved_packs WHERE id = ?1"
+    )))
+    .bind(id)
+    .fetch_optional(reads)
+    .await
+}
+
+/// A pack by its share slug (public read for the share/add flow).
+pub async fn get_pack_by_slug(reads: &SqlitePool, slug: &str) -> sqlx::Result<Option<SavedPack>> {
+    sqlx::query_as::<_, SavedPack>(sqlx::AssertSqlSafe(format!(
+        "SELECT {PACK_COLS} FROM saved_packs WHERE share_slug = ?1"
+    )))
+    .bind(slug)
+    .fetch_optional(reads)
+    .await
+}
+
+/// A pack's member items (insertion order).
+pub async fn pack_items(reads: &SqlitePool, pack_id: &str) -> sqlx::Result<Vec<SavedItem>> {
+    sqlx::query_as::<_, SavedItem>(sqlx::AssertSqlSafe(format!(
+        "SELECT {SAVED_COLS} FROM saved_items WHERE pack_id = ?1 ORDER BY created_at ASC, id ASC"
+    )))
+    .bind(pack_id)
+    .fetch_all(reads)
+    .await
+}
+
+/// Rename a pack (owner only). Returns whether a row changed.
+pub async fn rename_pack(
+    write: &SqlitePool,
+    id: &str,
+    owner_id: &str,
+    name: &str,
+) -> sqlx::Result<bool> {
+    let r = sqlx::query("UPDATE saved_packs SET name = ?3 WHERE id = ?1 AND owner_id = ?2")
+        .bind(id)
+        .bind(owner_id)
+        .bind(name)
+        .execute(write)
+        .await?;
+    Ok(r.rows_affected() > 0)
+}
+
+/// Change a pack's kind (owner only) and keep its items' `is_sticker` in sync so
+/// they still render bare when sent to a room. Returns whether the pack changed.
+pub async fn set_pack_kind(
+    write: &SqlitePool,
+    id: &str,
+    owner_id: &str,
+    kind: &str,
+) -> sqlx::Result<bool> {
+    let r = sqlx::query("UPDATE saved_packs SET kind = ?3 WHERE id = ?1 AND owner_id = ?2")
+        .bind(id)
+        .bind(owner_id)
+        .bind(kind)
+        .execute(write)
+        .await?;
+    if r.rows_affected() == 0 {
+        return Ok(false);
+    }
+    sqlx::query("UPDATE saved_items SET is_sticker = ?2 WHERE pack_id = ?1")
+        .bind(id)
+        .bind(kind != "saved")
+        .execute(write)
+        .await?;
+    Ok(true)
+}
+
+/// Set a pack's cover item (used when the first item lands, or an import finishes).
+pub async fn set_pack_cover(write: &SqlitePool, id: &str, cover_item_id: &str) -> sqlx::Result<()> {
+    sqlx::query("UPDATE saved_packs SET cover_item_id = ?2 WHERE id = ?1")
+        .bind(id)
+        .bind(cover_item_id)
+        .execute(write)
+        .await?;
+    Ok(())
+}
+
+/// Delete a pack + all its items (owner only). Returns the deleted items' ids so
+/// the caller can drop their blobs. Empty if the pack didn't exist / wasn't owned.
+pub async fn delete_pack(
+    write: &SqlitePool,
+    id: &str,
+    owner_id: &str,
+) -> sqlx::Result<Vec<String>> {
+    let owned: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM saved_packs WHERE id = ?1 AND owner_id = ?2")
+            .bind(id)
+            .bind(owner_id)
+            .fetch_optional(write)
+            .await?;
+    if owned.is_none() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<(String,)> = sqlx::query_as("SELECT id FROM saved_items WHERE pack_id = ?1")
+        .bind(id)
+        .fetch_all(write)
+        .await?;
+    sqlx::query("DELETE FROM saved_items WHERE pack_id = ?1")
+        .bind(id)
+        .execute(write)
+        .await?;
+    sqlx::query("DELETE FROM saved_packs WHERE id = ?1")
+        .bind(id)
+        .execute(write)
+        .await?;
+    Ok(ids.into_iter().map(|(i,)| i).collect())
+}
+
+/// Delete one item from a pack the caller owns. Returns whether a row was removed.
+pub async fn delete_pack_item(
+    write: &SqlitePool,
+    pack_id: &str,
+    item_id: &str,
+    owner_id: &str,
+) -> sqlx::Result<bool> {
+    let r = sqlx::query(
+        "DELETE FROM saved_items WHERE id = ?1 AND pack_id = ?2
+           AND pack_id IN (SELECT id FROM saved_packs WHERE owner_id = ?3)",
+    )
+    .bind(item_id)
+    .bind(pack_id)
+    .bind(owner_id)
+    .execute(write)
+    .await?;
+    Ok(r.rows_affected() > 0)
+}
+
 /// Look up an attachment plus the room it belongs to (for access checks).
 pub async fn lookup_attachment(
     reads: &SqlitePool,
     id: &str,
 ) -> sqlx::Result<Option<(String, Attachment)>> {
     let row = sqlx::query_as::<_, AttRow>(
-        "SELECT room_id, id, filename, content_type, size, width, height, has_thumb, has_alpha
+        "SELECT room_id, id, filename, content_type, size, width, height, has_thumb, has_alpha, is_sticker, pack_slug
          FROM attachments WHERE id = ?1",
     )
     .bind(id)
@@ -562,6 +781,8 @@ pub async fn lookup_attachment(
                 height: r.height,
                 has_thumb: r.has_thumb,
                 has_alpha: r.has_alpha,
+                is_sticker: r.is_sticker,
+                pack_slug: r.pack_slug,
             },
         )
     }))

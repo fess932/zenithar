@@ -3,6 +3,7 @@
   import { me, loaded, loadMe } from "./lib/session";
   import Chat from "./lib/Chat.svelte";
   import Landing from "./lib/Landing.svelte";
+  import AddPackModal from "./lib/AddPackModal.svelte";
 
   onMount(() => {
     // The cookie is already set by GET /i/:token; drop the token from the URL.
@@ -17,6 +18,7 @@
   <div class="h-dvh bg-ink"></div>
 {:else if $me}
   <Chat />
+  <AddPackModal />
 {:else}
   <Landing />
 {/if}

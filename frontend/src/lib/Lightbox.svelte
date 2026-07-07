@@ -4,15 +4,19 @@
   import { quintOut } from "svelte/easing";
   import { lightbox, closeLightbox, step } from "./lightbox";
   import { saveFromMessage } from "./saved";
+  import { addPackBySlug } from "./packs";
   import { t } from "./i18n";
 
-  // Save the shown image/video into your private collection ("сохранёнки").
+  // Save the shown item into your collection ("сохранёнки"). For a sticker that
+  // belongs to a pack, this adds the WHOLE pack instead of the single sticker.
   let saving = false;
   let savedOk = false;
   async function save(): Promise<void> {
     if (!current || saving) return;
     saving = true;
-    savedOk = await saveFromMessage(current.id);
+    savedOk = current.packSlug
+      ? !!(await addPackBySlug(current.packSlug))
+      : await saveFromMessage(current.id);
     saving = false;
     if (savedOk) setTimeout(() => (savedOk = false), 1500);
   }
@@ -134,15 +138,19 @@
     else if (e.key === "ArrowLeft") go(-1);
   }
 
-  // Horizontal swipe on touch to page through the gallery.
+  // Horizontal swipe on touch to page through the gallery. Ignore mostly-vertical
+  // swipes and any gesture on a zoomed image (that's a pan, not a page turn).
   let touchX: number | null = null;
+  let touchY = 0;
   function onTouchStart(e: TouchEvent): void {
     touchX = e.changedTouches[0]?.clientX ?? null;
+    touchY = e.changedTouches[0]?.clientY ?? 0;
   }
   function onTouchEnd(e: TouchEvent): void {
     if (touchX === null || zoom > 1) return; // panning a zoomed image ≠ paging
     const dx = (e.changedTouches[0]?.clientX ?? touchX) - touchX;
-    if (Math.abs(dx) > 50) go(dx < 0 ? 1 : -1);
+    const dy = (e.changedTouches[0]?.clientY ?? touchY) - touchY;
+    if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.5) go(dx < 0 ? 1 : -1);
     touchX = null;
   }
 </script>
@@ -182,13 +190,13 @@
           type="button"
           onclick={save}
           disabled={saving}
-          aria-label={$t("saveImage")}
-          title={$t("saveImage")}
+          aria-label={current.packSlug ? $t("addPack") : $t("saveImage")}
+          title={current.packSlug ? $t("addPack") : $t("saveImage")}
           class="grid size-9 shrink-0 cursor-pointer place-items-center rounded-md border text-lg disabled:opacity-50 {savedOk
             ? 'border-emerald-400/60 text-emerald-400'
             : 'border-white/20 text-white/80 hover:border-white/60 hover:text-white'}"
         >
-          {savedOk ? "✓" : "🔖"}
+          {savedOk ? "✓" : current.packSlug ? "＋" : "🔖"}
         </button>
       {/if}
       <a
@@ -265,13 +273,14 @@
     </div>
 
     {#if many}
-      <!-- Prev / next, large enough to thumb on mobile, vertically centered. -->
+      <!-- Prev / next: faint and unobtrusive (you can also swipe). A soft shadow
+           keeps the glyph legible over light images without a solid button. -->
       <button
         type="button"
         onclick={() => go(-1)}
         aria-label={$t("prevImage")}
         title={$t("prevImage")}
-        class="pointer-events-auto absolute left-2 top-1/2 grid size-11 -translate-y-1/2 place-items-center rounded-full border border-white/20 bg-black/40 text-xl text-white/80 hover:border-white/60 hover:text-white sm:left-4"
+        class="pointer-events-auto absolute left-1 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-full text-3xl leading-none text-white/30 drop-shadow-[0_1px_3px_rgba(0,0,0,0.7)] transition hover:text-white/90 sm:left-3"
       >
         ‹
       </button>
@@ -280,7 +289,7 @@
         onclick={() => go(1)}
         aria-label={$t("nextImage")}
         title={$t("nextImage")}
-        class="pointer-events-auto absolute right-2 top-1/2 grid size-11 -translate-y-1/2 place-items-center rounded-full border border-white/20 bg-black/40 text-xl text-white/80 hover:border-white/60 hover:text-white sm:right-4"
+        class="pointer-events-auto absolute right-1 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-full text-3xl leading-none text-white/30 drop-shadow-[0_1px_3px_rgba(0,0,0,0.7)] transition hover:text-white/90 sm:right-3"
       >
         ›
       </button>

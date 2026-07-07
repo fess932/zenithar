@@ -8,15 +8,21 @@
 
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { type StickerDef, stickerUrl, formatOf } from "./stickers";
+  import { type StickerDef, type StickerFormat, stickerUrl, formatOf } from "./stickers";
 
-  export let def: StickerDef;
+  // Either a bundled sticker (`def`), or an arbitrary blob via `src` + `format`
+  // (used to render pack items / saved Lottie animations).
+  export let def: StickerDef | undefined = undefined;
+  export let src: string | undefined = undefined;
+  export let format: StickerFormat | undefined = undefined;
+  export let alt = "";
   export let size = 128;
   export let autoplay = true;
   export let loop = true;
 
-  $: fmt = formatOf(def.file);
-  $: url = stickerUrl(def);
+  $: fmt = format ?? (def ? formatOf(def.file) : "webp");
+  $: url = src ?? (def ? stickerUrl(def) : "");
+  $: label = alt || def?.emoji || "";
 
   let canvas: HTMLCanvasElement | undefined;
   let player: DotLottie | undefined;
@@ -54,5 +60,5 @@
     style="width:{size}px;height:{size}px;object-fit:contain"
   ></video>
 {:else}
-  <img src={url} alt={def.emoji} style="width:{size}px;height:{size}px;object-fit:contain" />
+  <img src={url} alt={label} style="width:{size}px;height:{size}px;object-fit:contain" />
 {/if}

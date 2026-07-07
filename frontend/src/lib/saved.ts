@@ -12,6 +12,8 @@ export interface SavedItem {
   width: number | null;
   height: number | null;
   has_thumb: boolean;
+  has_alpha?: boolean;
+  is_sticker?: boolean;
   public: boolean;
   created_at: number;
 }
