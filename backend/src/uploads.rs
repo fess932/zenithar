@@ -453,8 +453,11 @@ async fn serve_inner(
     let cache = "private, max-age=31536000, immutable".to_string();
 
     // A range request (video seeking) → 206 with just the requested slice. Thumbs
-    // are small images, always served whole.
-    if !thumb {
+    // are small images, always served whole. Stickers are also served whole (200):
+    // a looping <video> sticker always range-requests, and browsers reuse a cached
+    // 206 far less reliably than a 200 — so a small sticker would refetch on every
+    // remount. Answering the range with the full 200 lets the disk cache serve it.
+    if !thumb && !att.is_sticker {
         let storage = state.storage.clone();
         let key2 = key.clone();
         let total = match tokio::task::spawn_blocking(move || storage.size(&key2)).await {

@@ -83,6 +83,15 @@ body {
     box-shadow: inset 0 0 0 9999px rgb(232 176 75 / 0);
   }
 }
+/* A sweeping highlight for skeleton placeholders (media still loading). */
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 160% 0;
+  }
+  to {
+    background-position: -160% 0;
+  }
+}
 
 /* Stateful / animated pieces — composed from Tailwind utilities via @apply. */
 @layer components {
@@ -130,6 +139,22 @@ body {
     }
   }
 
+  /* Placeholder shown while an image/video/sticker loads — a soft surface with a
+     sweeping highlight. Sized by the caller (fills its box). */
+  .skeleton {
+    @apply rounded-md bg-surface-2;
+    background-image: linear-gradient(
+      100deg,
+      transparent 20%,
+      rgb(255 255 255 / 0.05) 40%,
+      rgb(255 255 255 / 0.1) 50%,
+      rgb(255 255 255 / 0.05) 60%,
+      transparent 80%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.25s ease-in-out infinite;
+  }
+
   /* Connection beacon — state lives on .beacon[data-state]. */
   .beacon-dot {
     @apply size-2 rounded-full bg-muted;
@@ -150,7 +175,8 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .beacon-dot,
-  .bubble.arrived {
+  .bubble.arrived,
+  .skeleton {
     animation: none !important;
   }
 }

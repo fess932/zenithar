@@ -159,6 +159,28 @@ export const status = writable<Status>("connecting");
 export const rooms = writable<RoomSummary[]>([]);
 export const activeRoom = writable<string | null>(null);
 
+// Per-room transcript cache. Switching rooms shows the last-seen messages
+// INSTANTLY (no blank flash) while the fresh `history` frame loads and quietly
+// reconciles. Because the list is keyed by message id, unchanged messages keep
+// their DOM across the switch — their images/videos/stickers aren't torn down
+// and refetched. Kept in sync by mirroring the store into the active room's slot.
+const roomCache = new Map<string, ChatMessage[]>();
+let cacheRoom: string | null = null;
+activeRoom.subscribe((r) => (cacheRoom = r));
+messages.subscribe((m) => {
+  if (cacheRoom) roomCache.set(cacheRoom, m);
+});
+/// True once we've received a real `history` frame for the room, so the UI can
+/// tell "cache shown, still loading" from "loaded / genuinely empty".
+export const roomHydrated = writable(false);
+
+/// Bumped whenever *I* send something — the chat view watches this and snaps to
+/// the bottom so my just-sent message is always visible, even if I'd scrolled up.
+export const scrollToBottomSignal = writable(0);
+export function requestScrollToBottom(): void {
+  scrollToBottomSignal.update((n) => n + 1);
+}
+
 // Older-history pagination (lazy load on scroll-up). `hasMoreHistory` flips false
 // once a short page comes back; `loadingOlder` guards against concurrent loads.
 const HISTORY_PAGE = 50;
@@ -318,7 +340,8 @@ export function connect(): void {
       activeRoom.set(room);
       clearUnread(room); // viewing it now → no longer unread
       const msgs = (f as { messages: ChatMessage[] }).messages;
-      messages.set(msgs);
+      messages.set(msgs); // authoritative — reconciles over any cached view
+      roomHydrated.set(true);
       hasMoreHistory.set(msgs.length >= HISTORY_PAGE); // a full page → maybe more
       if (msgs.length) sendRead(room, msgs[msgs.length - 1].created_at); // read receipt
     } else if (f.type === "message") {
@@ -441,10 +464,27 @@ export function joinRoom(room_id: string): void {
   replyingTo.set(null); // a reply target doesn't carry across rooms
   editing.set(null); // an in-progress edit doesn't carry across rooms
   clearUnread(room_id);
-  messages.set([]); // history frame will repopulate
+  // Show the cached transcript instantly (no blank flash); the history frame
+  // reconciles it. Only rooms we've never opened start empty + "loading".
+  const cached = roomCache.get(room_id);
+  messages.set(cached ?? []);
+  roomHydrated.set(!!cached);
+  hasMoreHistory.set(!cached || cached.length >= HISTORY_PAGE);
   if (ws?.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: "join", room_id }));
   }
+}
+
+/// Leave the active room (e.g. mobile back to the chat list). Tells the server so
+/// further messages there arrive as an unread badge instead of being auto-read,
+/// and drops the local active room. The per-room cache is kept, so re-opening it
+/// is still instant.
+export function leaveRoom(): void {
+  if (get(activeRoom) === null) return;
+  sendFrame({ type: "leave" });
+  activeRoom.set(null); // clears cacheRoom first, so the next line won't wipe the cache
+  messages.set([]);
+  roomHydrated.set(false);
 }
 
 export function send(
@@ -466,6 +506,7 @@ export function send(
     }
     pending.push(m);
   }
+  requestScrollToBottom();
   return true;
 }
 
@@ -485,6 +526,7 @@ export function sendSticker(id: string): boolean {
     }
     pending.push(m);
   }
+  requestScrollToBottom();
   return true;
 }
 

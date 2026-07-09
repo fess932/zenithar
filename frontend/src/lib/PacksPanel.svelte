@@ -1,6 +1,8 @@
 <script lang="ts">
   import { t } from "./i18n";
   import Sticker from "./Sticker.svelte";
+  import Thumb from "./Thumb.svelte";
+  import PickerTile from "./PickerTile.svelte";
   import { type SavedItem } from "./saved";
   import {
     type Pack,
@@ -185,9 +187,15 @@
       <div class="grid grid-cols-[repeat(auto-fill,minmax(3.5rem,1fr))] gap-1">
         {#each p.items as it (it.id)}
           <div class="relative aspect-square">
-            <button
-              type="button"
-              onclick={() => onSend?.(it.id)}
+            <PickerTile
+              onSend={onSend ? () => onSend?.(it.id) : null}
+              previewSrc={packItemUrl(it.id)}
+              previewKind={isLottie(it.content_type)
+                ? "lottie"
+                : isVideoSticker(it.content_type)
+                  ? "webm"
+                  : "img"}
+              alt={it.filename}
               class="grid size-full place-items-center rounded p-0.5 hover:bg-surface {onSend
                 ? 'cursor-pointer'
                 : 'cursor-default'}"
@@ -198,14 +206,9 @@
                 <Sticker src={packItemUrl(it.id)} format="webm" alt={it.filename} size={52} />
               {:else}
                 <!-- The original blob, so animated WebP/GIF actually animate. -->
-                <img
-                  src={packItemUrl(it.id)}
-                  alt={it.filename}
-                  loading="lazy"
-                  class="max-h-full max-w-full object-contain"
-                />
+                <Thumb src={packItemUrl(it.id)} alt={it.filename} class="max-h-full max-w-full object-contain" />
               {/if}
-            </button>
+            </PickerTile>
             {#if managing.has(p.id)}
               <button
                 type="button"

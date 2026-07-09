@@ -178,6 +178,10 @@ pub struct CallParticipant {
 pub enum Inbound {
     /// Switch the socket's active room (employees only switch; clients are pinned).
     Join { room_id: String },
+    /// Leave the active room (e.g. back to the mobile chat list): marks it read up
+    /// to now, then clears the active room so further messages there arrive as an
+    /// unread badge instead of being auto-read.
+    Leave,
     /// Send a message to the active room (optionally carrying up to 5 attachments).
     Msg {
         body: String,

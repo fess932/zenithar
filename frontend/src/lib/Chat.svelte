@@ -21,6 +21,7 @@
     rooms,
     activeRoom,
     joinRoom,
+    leaveRoom,
     loadRooms,
     notice,
     dismissNotice,
@@ -29,6 +30,8 @@
     loadOlder,
     setViewPinned,
     resync,
+    roomHydrated,
+    scrollToBottomSignal,
     type RoomSummary,
   } from "./chat";
   import {
@@ -83,7 +86,11 @@
       mobile = mq.matches;
     };
     const onPop = (): void => {
-      roomOpen = !!history.state?.zRoom;
+      const nowOpen = !!history.state?.zRoom;
+      // Going room → chat list on mobile actually leaves the room (marks it read,
+      // stops auto-reading its new messages → they show as an unread badge).
+      if (roomOpen && !nowOpen && mobile && isEmployee) leaveRoom();
+      roomOpen = nowOpen;
     };
     mq.addEventListener("change", onMq);
     window.addEventListener("popstate", onPop);
@@ -168,6 +175,18 @@
   afterUpdate(() => {
     if (pinned && logEl) logEl.scrollTop = logEl.scrollHeight;
   });
+
+  // On my own send, re-pin to the bottom so the just-sent message is visible even
+  // if I'd scrolled up. Pinning makes the echoed message's afterUpdate snap down;
+  // the immediate tick handles anything already rendered.
+  let lastScrollReq = 0;
+  $: if ($scrollToBottomSignal !== lastScrollReq) {
+    lastScrollReq = $scrollToBottomSignal;
+    pinned = true;
+    tick().then(() => {
+      if (logEl) logEl.scrollTop = logEl.scrollHeight;
+    });
+  }
 
   $: current = $rooms.find((r) => r.id === $activeRoom) ?? null;
   $: currentTitle = current ? roomLabel(current, $t("room")) : $t("room");
@@ -257,7 +276,17 @@
         style:transform="translateY({-pullDist}px)"
         style:transition={pullStart !== null ? "none" : "transform 0.15s"}
       >
-        {#if $messages.length === 0}
+        {#if $messages.length === 0 && !$roomHydrated}
+          <!-- Opening a room we've never cached: shimmer placeholders while the
+               history frame loads, instead of a blank flash / premature "empty". -->
+          <div class="space-y-3 px-3 py-4" aria-hidden="true">
+            {#each [72, 55, 40, 64, 48] as w, i (i)}
+              <div class="flex {i % 2 ? 'justify-end' : 'justify-start'}">
+                <div class="skeleton h-9 rounded-2xl" style="width:{w}%"></div>
+              </div>
+            {/each}
+          </div>
+        {:else if $messages.length === 0}
           <p class="px-6 py-10 font-mono text-[0.82rem] text-muted">{$t("empty")}</p>
         {:else}
           {#each $messages as m, i (m.id)}

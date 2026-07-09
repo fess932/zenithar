@@ -6,10 +6,48 @@
   import { getMicStream } from "./mic";
   import { fmtDur } from "./util/format";
   import Sticker from "./Sticker.svelte";
-  import { STICKERS } from "./stickers";
+  import Thumb from "./Thumb.svelte";
+  import { STICKERS, stickerUrl, formatOf, sticker } from "./stickers";
+  import PickerTile from "./PickerTile.svelte";
   import { listSaved, sendSaved, uploadSaved, savedThumb, savedUrl, type SavedItem } from "./saved";
   import PacksPanel from "./PacksPanel.svelte";
-  import { listPacks, type Pack } from "./packs";
+  import { listPacks, isLottie, isVideoSticker, type Pack } from "./packs";
+  import {
+    pushRecentEmoji,
+    pushRecentBundled,
+    pushRecentItem,
+    recentsFor,
+    type RecentCat,
+    type RecentEntry,
+  } from "./recents";
+  import type { PreviewKind } from "./stickerPreview";
+
+  const recentEmoji = recentsFor("emoji");
+  const recentStickers = recentsFor("stickers");
+  const recentGifs = recentsFor("gifs");
+  const recentSaved = recentsFor("saved");
+
+  // Renderer for a recent item, inferred from its stored content-type.
+  function itemKind(ct: string): PreviewKind {
+    return isLottie(ct)
+      ? "lottie"
+      : isVideoSticker(ct)
+        ? "webm"
+        : ct.startsWith("video/")
+          ? "video"
+          : "img";
+  }
+  // Look up a just-sent item's content-type from the loaded lists so the recent
+  // entry knows how to render it later.
+  function findCt(id: string): string {
+    const s = savedItems?.find((it) => it.id === id);
+    if (s) return s.content_type;
+    for (const p of packs ?? []) {
+      const it = p.items.find((x) => x.id === id);
+      if (it) return it.content_type;
+    }
+    return "";
+  }
 
   const MAX_ATTACH = 5;
 
@@ -50,6 +88,8 @@
   $: savedPacks = (packs ?? []).filter((p) => p.kind === "saved");
 
   function pickSaved(id: string): void {
+    const cat: RecentCat = pickerTab === "gifs" ? "gifs" : pickerTab === "saved" ? "saved" : "stickers";
+    pushRecentItem(cat, id, findCt(id));
     void sendSaved(id);
     showEmoji = false;
   }
@@ -139,10 +179,14 @@
 
   function addEmoji(em: string): void {
     body += em;
+    pushRecentEmoji(em);
   }
 
   function pickSticker(id: string): void {
-    if (sendSticker(id)) showEmoji = false;
+    if (sendSticker(id)) {
+      pushRecentBundled(id);
+      showEmoji = false;
+    }
   }
 
   async function onFilePicked(e: Event): Promise<void> {
@@ -403,6 +447,62 @@
     </div>
   {/if}
 
+  <!-- One recent picker item (bundled sticker or a saved/pack item). -->
+  {#snippet recentTile(e: RecentEntry)}
+    {#if e.kind === "bundled"}
+      {@const def = sticker(e.id)}
+      {#if def}
+        <PickerTile
+          onSend={() => pickSticker(e.id)}
+          previewSrc={stickerUrl(def)}
+          previewKind={formatOf(def.file) === "lottie"
+            ? "lottie"
+            : formatOf(def.file) === "webm"
+              ? "webm"
+              : "img"}
+          alt={def.emoji}
+          class="grid aspect-square cursor-pointer place-items-center rounded p-1 hover:bg-surface"
+        >
+          <Sticker {def} size={52} />
+        </PickerTile>
+      {/if}
+    {:else if e.kind === "item"}
+      {@const k = itemKind(e.ct)}
+      <div class="relative aspect-square">
+        <PickerTile
+          onSend={() => pickSaved(e.id)}
+          previewSrc={savedUrl(e.id)}
+          previewKind={k}
+          class="grid size-full cursor-pointer place-items-center rounded p-0.5 hover:bg-surface"
+        >
+          {#if k === "lottie"}
+            <Sticker src={savedUrl(e.id)} format="lottie" size={52} />
+          {:else if k === "webm"}
+            <Sticker src={savedUrl(e.id)} format="webm" size={52} />
+          {:else}
+            <Thumb src={savedUrl(e.id)} class="max-h-full max-w-full object-contain" />
+          {/if}
+        </PickerTile>
+      </div>
+    {/if}
+  {/snippet}
+
+  <!-- "Recent" strip at the top of a sticker/gif/saved tab. -->
+  {#snippet recentStrip(entries: RecentEntry[])}
+    {#if entries.length}
+      <div class="mb-2 border-b border-line pb-2">
+        <p class="mb-1 px-0.5 font-mono text-[0.6rem] uppercase tracking-[0.08em] text-muted">
+          {$t("recent")}
+        </p>
+        <div class="grid grid-cols-[repeat(auto-fill,minmax(3.5rem,1fr))] gap-1">
+          {#each entries.slice(0, 16) as e (e.kind + ":" + (e.kind === "emoji" ? e.v : e.id))}
+            {@render recentTile(e)}
+          {/each}
+        </div>
+      </div>
+    {/if}
+  {/snippet}
+
   <!-- emoji / stickers / gifs panel -->
   {#if showEmoji}
     <div class="mb-2 overflow-hidden rounded-md border border-line bg-surface-2">
@@ -422,6 +522,28 @@
       <!-- content -->
       <div class="max-h-44 overflow-y-auto p-2">
         {#if pickerTab === "emoji"}
+          {#if $recentEmoji.length}
+            <div class="mb-2 border-b border-line pb-2">
+              <p
+                class="mb-1 px-0.5 font-mono text-[0.6rem] uppercase tracking-[0.08em] text-muted"
+              >
+                {$t("recent")}
+              </p>
+              <div class="grid grid-cols-[repeat(auto-fill,minmax(2.25rem,1fr))] gap-1">
+                {#each $recentEmoji.slice(0, 24) as e (e.kind === "emoji" ? e.v : "")}
+                  {#if e.kind === "emoji"}
+                    <button
+                      type="button"
+                      onclick={() => addEmoji(e.v)}
+                      class="grid aspect-square cursor-pointer place-items-center rounded text-lg hover:bg-surface"
+                    >
+                      {e.v}
+                    </button>
+                  {/if}
+                {/each}
+              </div>
+            </div>
+          {/if}
           <div class="grid grid-cols-[repeat(auto-fill,minmax(2.25rem,1fr))] gap-1">
             {#each EMOJI as em}
               <button
@@ -434,24 +556,32 @@
             {/each}
           </div>
         {:else if pickerTab === "stickers"}
+          {@render recentStrip($recentStickers)}
           <div class="grid grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-1">
             {#each STICKERS as s (s.id)}
-              <button
-                type="button"
-                onclick={() => pickSticker(s.id)}
-                aria-label={s.emoji}
+              <PickerTile
+                onSend={() => pickSticker(s.id)}
+                previewSrc={stickerUrl(s)}
+                previewKind={formatOf(s.file) === "lottie"
+                  ? "lottie"
+                  : formatOf(s.file) === "webm"
+                    ? "webm"
+                    : "img"}
+                alt={s.emoji}
                 class="grid aspect-square cursor-pointer place-items-center rounded p-1 hover:bg-surface"
               >
                 <Sticker def={s} size={64} />
-              </button>
+              </PickerTile>
             {/each}
           </div>
           <div class="mt-2 border-t border-line pt-2">
             <PacksPanel packs={stickerPacks} onSend={pickSaved} onChanged={onPacksChanged} />
           </div>
         {:else if pickerTab === "gifs"}
+          {@render recentStrip($recentGifs)}
           <PacksPanel packs={gifPacks} onSend={pickSaved} onChanged={onPacksChanged} />
         {:else if pickerTab === "saved"}
+          {@render recentStrip($recentSaved)}
           <div class="grid grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-1">
             <!-- Upload tile -->
             <button
@@ -464,9 +594,11 @@
               +
             </button>
             {#each savedItems ?? [] as it (it.id)}
-              <button
-                type="button"
-                onclick={() => pickSaved(it.id)}
+              <PickerTile
+                onSend={() => pickSaved(it.id)}
+                previewSrc={savedUrl(it.id)}
+                previewKind={it.content_type.startsWith("video/") ? "video" : "img"}
+                alt={it.filename}
                 class="relative aspect-square cursor-pointer overflow-hidden rounded border border-line hover:border-beacon"
               >
                 {#if it.content_type.startsWith("video/")}
@@ -480,14 +612,12 @@
                   ></video>
                   <span class="pointer-events-none absolute inset-0 grid place-items-center text-white/90">▶</span>
                 {:else}
-                  <img
+                  <Thumb
                     src={it.has_thumb && !it.has_alpha ? savedThumb(it.id) : savedUrl(it.id)}
                     alt={it.filename}
-                    loading="lazy"
-                    class="size-full object-cover"
                   />
                 {/if}
-              </button>
+              </PickerTile>
             {/each}
           </div>
           {#if savedItems !== null && savedItems.length === 0}

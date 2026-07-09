@@ -174,6 +174,17 @@ async fn handle_socket(socket: WebSocket, state: AppState, principal: Principal)
                         }
                         let _ = db::mark_read(&state.db, &principal.id, &active_room, now).await;
                     }
+                    Inbound::Leave => {
+                        // Back to the chat list: mark the room read up to now, then
+                        // clear the active room. An empty id matches no room, so
+                        // subsequent messages arrive as `unread` badges (not auto-read
+                        // `message` frames). Clients are pinned — nothing to leave.
+                        if client_room.is_none() && !active_room.is_empty() {
+                            let now = crate::now_millis();
+                            let _ = db::mark_read(&state.db, &principal.id, &active_room, now).await;
+                            active_room = String::new();
+                        }
+                    }
                     Inbound::Msg { body, client_msg_id, attachment_ids, reply_to, sticker } => {
                         if !msg_bucket.check() {
                             debug!("message rate-limited");

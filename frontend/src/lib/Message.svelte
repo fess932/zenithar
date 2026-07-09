@@ -86,6 +86,10 @@
 
   const orig = (id: string) => `/api/attachments/${id}`;
   const thumb = (id: string) => `/api/attachments/${id}/thumb`;
+
+  // One size for every lone sticker/GIF/animated message so they read as a
+  // consistent set: ~2/3 of the screen on mobile, capped bigger on desktop.
+  const STICKER_SIZE = "min(64vw, 18rem)";
 </script>
 
 <!-- The message bubble itself; shared by the "mine" (right, no avatar) and the
@@ -220,7 +224,7 @@
 <!-- Sticker message: the bundled animation, no bubble chrome, with a small time. -->
 {#snippet stickerBlock()}
   {#if stickerDef}
-    <Sticker def={stickerDef} size={128} />
+    <Sticker def={stickerDef} size={STICKER_SIZE} />
   {:else}
     <span class="text-5xl leading-none" title={m.sticker}>🖼️</span>
   {/if}
@@ -238,24 +242,25 @@
   {#if isLottie(a.content_type)}
     <!-- Animated (Lottie) sticker: play it inline, no zoom/lightbox. -->
     <div class="block">
-      <Sticker src={orig(a.id)} format="lottie" alt={a.filename} size={144} />
+      <Sticker src={orig(a.id)} format="lottie" alt={a.filename} size={STICKER_SIZE} />
     </div>
   {:else if isVideoSticker(a.content_type)}
     <!-- WebM video sticker: autoplay/loop, bare, no controls. -->
     <div class="block">
-      <Sticker src={orig(a.id)} format="webm" alt={a.filename} size={144} />
+      <Sticker src={orig(a.id)} format="webm" alt={a.filename} size={STICKER_SIZE} />
     </div>
   {:else}
     <button
       type="button"
       onclick={() => openLightbox(a.id)}
       class="block cursor-zoom-in transition hover:brightness-110 active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100"
+      style="width:{STICKER_SIZE};height:{STICKER_SIZE}"
     >
       <img
         src={orig(a.id)}
         alt={a.filename}
         loading="lazy"
-        class="max-h-52 max-w-[13rem] object-contain"
+        class="size-full object-contain"
       />
     </button>
   {/if}

@@ -16,13 +16,20 @@
   export let src: string | undefined = undefined;
   export let format: StickerFormat | undefined = undefined;
   export let alt = "";
-  export let size = 128;
+  // A number is treated as px; a string is used verbatim as a CSS length, so
+  // callers can pass responsive sizes like "min(62vw, 16rem)".
+  export let size: number | string = 128;
   export let autoplay = true;
   export let loop = true;
 
   $: fmt = format ?? (def ? formatOf(def.file) : "webp");
   $: url = src ?? (def ? stickerUrl(def) : "");
   $: label = alt || def?.emoji || "";
+  $: sizeCss = typeof size === "number" ? `${size}px` : size;
+
+  // Show a shimmer placeholder until the media is actually decoded/ready, then
+  // fade it in — a grid of stickers hydrates smoothly instead of popping in blank.
+  let loaded = false;
 
   let canvas: HTMLCanvasElement | undefined;
   let player: DotLottie | undefined;
@@ -42,23 +49,41 @@
           devicePixelRatio: window.devicePixelRatio || 1,
         },
       });
+      player.addEventListener("load", () => (loaded = true));
     }
   });
   onDestroy(() => player?.destroy());
 </script>
 
-{#if fmt === "lottie"}
-  <canvas bind:this={canvas} style="width:{size}px;height:{size}px"></canvas>
-{:else if fmt === "webm"}
-  <!-- svelte-ignore a11y_media_has_caption -->
-  <video
-    src={url}
-    {autoplay}
-    {loop}
-    muted
-    playsinline
-    style="width:{size}px;height:{size}px;object-fit:contain"
-  ></video>
-{:else}
-  <img src={url} alt={label} style="width:{size}px;height:{size}px;object-fit:contain" />
-{/if}
+<div class="relative inline-block align-middle" style="width:{sizeCss};height:{sizeCss}">
+  {#if !loaded}
+    <div class="skeleton absolute inset-0"></div>
+  {/if}
+  {#if fmt === "lottie"}
+    <canvas
+      bind:this={canvas}
+      class="relative size-full transition-opacity duration-200"
+      class:opacity-0={!loaded}
+    ></canvas>
+  {:else if fmt === "webm"}
+    <!-- svelte-ignore a11y_media_has_caption -->
+    <video
+      src={url}
+      {autoplay}
+      {loop}
+      muted
+      playsinline
+      onloadeddata={() => (loaded = true)}
+      class="relative size-full object-contain transition-opacity duration-200"
+      class:opacity-0={!loaded}
+    ></video>
+  {:else}
+    <img
+      src={url}
+      alt={label}
+      onload={() => (loaded = true)}
+      class="relative size-full object-contain transition-opacity duration-200"
+      class:opacity-0={!loaded}
+    />
+  {/if}
+</div>
