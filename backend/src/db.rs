@@ -539,6 +539,35 @@ pub async fn set_saved_public(
     Ok(r.rows_affected() > 0)
 }
 
+/// Replace a saved item's media fields after re-encoding its blob in place (e.g.
+/// converting a WebM sticker to animated WebP). The id/blob key is unchanged.
+#[allow(clippy::too_many_arguments)]
+pub async fn update_saved_media(
+    write: &SqlitePool,
+    id: &str,
+    content_type: &str,
+    size: i64,
+    width: Option<i64>,
+    height: Option<i64>,
+    has_thumb: bool,
+    has_alpha: bool,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE saved_items SET content_type = ?2, size = ?3, width = ?4, height = ?5, \
+         has_thumb = ?6, has_alpha = ?7 WHERE id = ?1",
+    )
+    .bind(id)
+    .bind(content_type)
+    .bind(size)
+    .bind(width)
+    .bind(height)
+    .bind(has_thumb)
+    .bind(has_alpha)
+    .execute(write)
+    .await?;
+    Ok(())
+}
+
 /// Delete a saved item (owner only). Returns whether a row was removed (the caller
 /// then drops the blob).
 pub async fn delete_saved(write: &SqlitePool, id: &str, principal_id: &str) -> sqlx::Result<bool> {

@@ -47,6 +47,12 @@ export function isVideoSticker(ct: string): boolean {
   return ct.startsWith("video/");
 }
 
+/// True if the pack still holds old WebM (video) stickers — offer to convert them
+/// to the lighter animated-WebP format.
+export function packHasWebm(pack: Pack): boolean {
+  return pack.items.some((it) => it.content_type === "video/webm");
+}
+
 export async function listPacks(): Promise<Pack[]> {
   try {
     const r = await fetch("/api/packs");
@@ -123,6 +129,17 @@ export async function renamePack(id: string, name: string): Promise<boolean> {
 /// Move a pack to a different sub-list (sticker / gif / saved).
 export async function setPackKind(id: string, kind: PackKind): Promise<boolean> {
   return patchPack(id, { kind });
+}
+
+/// Convert a pack's WebM (video) stickers to animated WebP in place. Returns the
+/// refreshed pack (or null on failure).
+export async function convertPack(id: string): Promise<Pack | null> {
+  try {
+    const r = await fetch(`/api/packs/${id}/convert`, { method: "POST" });
+    return r.ok ? ((await r.json()) as Pack) : null;
+  } catch {
+    return null;
+  }
 }
 
 async function patchPack(

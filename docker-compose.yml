@@ -86,9 +86,13 @@ services:
   # WebM -> animated WebP transcoder sidecar (ffmpeg lives here, NOT in the main
   # distroless image). The backend POSTs video stickers on import and gets back
   # an animated WebP, so they render as a plain <img> (no per-sticker <video>).
-  # Built locally from ./transcoder (tiny: python-slim + ffmpeg). Host networking
-  # + loopback bind so :3001 is reachable by zenithar but NOT exposed externally.
+  # Image is built + pushed to GHCR by CI (same as zenithar) — deploy PULLS it:
+  #   docker compose up -d --pull always --force-recreate
+  # `build:` is kept for local `docker compose up --build` convenience.
+  # Host networking + loopback bind so :3001 is reachable by zenithar but NOT
+  # exposed externally.
   transcoder:
+    image: ghcr.io/fess932/zenithar-transcoder:latest
     build: ./transcoder
     network_mode: host
     environment:

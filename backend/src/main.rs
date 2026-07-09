@@ -439,6 +439,7 @@ async fn main() -> Result<()> {
             "/api/packs/{id}/items/{item_id}",
             delete(packs::delete_item),
         )
+        .route("/api/packs/{id}/convert", post(packs::convert))
         // Share flow — `{id}` here is the pack's share_slug (same param name as
         // above so matchit's route tree stays consistent).
         .route("/api/packs/{id}/preview", get(packs::preview))

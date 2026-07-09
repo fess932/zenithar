@@ -16,6 +16,8 @@
     deletePackItem,
     setPackKind,
     setPackPublic,
+    convertPack,
+    packHasWebm,
   } from "./packs";
 
   export let packs: Pack[];
@@ -83,6 +85,18 @@
     if (await deletePackItem(p.id, it.id)) onChanged();
   }
 
+  // Convert an old WebM pack to the lighter animated-WebP format (server-side,
+  // via the transcoder sidecar). Disabled while a pack is mid-conversion.
+  let converting = new Set<string>();
+  async function convert(p: Pack): Promise<void> {
+    converting = new Set(converting).add(p.id);
+    const updated = await convertPack(p.id);
+    const next = new Set(converting);
+    next.delete(p.id);
+    converting = next;
+    if (updated) onChanged(updated);
+  }
+
   // Toggle a per-pack "manage" mode that reveals delete affordances on items.
   let managing = new Set<string>();
   function toggleManage(id: string): void {
@@ -127,6 +141,18 @@
         <span class="truncate font-mono text-[0.72rem] text-you">{p.name}</span>
         <span class="font-mono text-[0.66rem] text-muted">{p.items.length}</span>
         <div class="ml-auto flex items-center gap-0.5">
+          {#if packHasWebm(p)}
+            <button
+              type="button"
+              onclick={() => convert(p)}
+              disabled={converting.has(p.id)}
+              title={$t("convertPack")}
+              aria-label={$t("convertPack")}
+              class="grid size-6 place-items-center rounded text-muted hover:bg-surface hover:text-beacon disabled:opacity-50"
+            >
+              {converting.has(p.id) ? "⏳" : "♻"}
+            </button>
+          {/if}
           <button
             type="button"
             onclick={() => togglePublic(p)}

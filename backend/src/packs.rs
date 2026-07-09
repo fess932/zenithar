@@ -185,6 +185,72 @@ pub async fn update(
     }
 }
 
+/// `POST /api/packs/:id/convert` — re-transcode any WebM (video) items in the
+/// pack to animated WebP in place (the new lighter format), so an old pack imported
+/// before transcoding renders as `<img>` instead of `<video>`. Owner only; needs
+/// the transcoder sidecar. Items that fail to convert are left as-is. Returns the
+/// refreshed pack.
+pub async fn convert(
+    State(state): State<AppState>,
+    Identity(p): Identity,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !origin_ok(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    match db::get_pack(&state.reads, &id).await {
+        Ok(Some(pack)) if pack.owner_id == p.id => {}
+        Ok(_) => return StatusCode::NOT_FOUND.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+    let items = db::pack_items(&state.reads, &id).await.unwrap_or_default();
+    for it in items {
+        if it.content_type != "video/webm" {
+            continue;
+        }
+        // Read the original WebM blob (its key is the item id).
+        let storage = state.storage.clone();
+        let key = it.id.clone();
+        let Ok(Ok(Some(webm))) = tokio::task::spawn_blocking(move || storage.get(&key)).await
+        else {
+            continue;
+        };
+        // Transcode → WebP; on failure (transcoder down) leave the item as WebM.
+        let Some(webp) = transcode_webm_to_webp(&webm).await else {
+            continue;
+        };
+        let size = webp.len() as i64;
+        let storage = state.storage.clone();
+        let key = it.id.clone();
+        let Ok(Ok(prepared)) = tokio::task::spawn_blocking(move || {
+            uploads::process_and_store(&*storage, &key, webp, Some("image/webp".to_string()))
+        })
+        .await
+        else {
+            continue;
+        };
+        // Stickers render bare from the original blob, so flag has_alpha like the
+        // import path does (matches store_item's `ct != "video/webm"`).
+        let _ = db::update_saved_media(
+            &state.db,
+            &it.id,
+            "image/webp",
+            size,
+            prepared.width,
+            prepared.height,
+            prepared.has_thumb,
+            true,
+        )
+        .await;
+    }
+    let items = db::pack_items(&state.reads, &id).await.unwrap_or_default();
+    match db::get_pack(&state.reads, &id).await {
+        Ok(Some(pack)) => Json(PackWithItems { pack, items }).into_response(),
+        _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
 /// `DELETE /api/packs/:id` — remove the pack, its items, and their blobs (owner).
 pub async fn delete(
     State(state): State<AppState>,
