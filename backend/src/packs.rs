@@ -542,7 +542,19 @@ async fn store_item(
         // re-encoding. The image pipeline still runs for a thumbnail + dimensions
         // where it can, but a decode failure (animated WebP first-frame-only, WebM)
         // is fine: we never reject on it.
-        let ct = sniff_media_ct(&bytes)?;
+        let mut ct = sniff_media_ct(&bytes)?;
+        let mut bytes = bytes;
+        // WebM (video) stickers are heavy to render — a `<video>` decoder per
+        // sticker janks a pack full of them. Transcode to an animated WebP on
+        // import so they render as a plain `<img>` (no video decoder), downscaled
+        // + fps-capped for weight. Needs ffmpeg; if it's missing or fails we keep
+        // the original WebM (still works, just heavier).
+        if ct == "video/webm" {
+            if let Some(webp) = transcode_webm_to_webp(&bytes).await {
+                bytes = webp;
+                ct = "image/webp";
+            }
+        }
         let size = bytes.len() as i64;
         let storage = state.storage.clone();
         let key = id.clone();
@@ -562,7 +574,7 @@ async fn store_item(
             has_thumb: prepared.has_thumb,
             // Stickers render bare (frameless) and straight from the original blob
             // so animation plays — that's exactly what the `has_alpha` path does.
-            // (Videos render via <video>, so leave their flag off.)
+            // (A WebM that failed to transcode stays a video → leave its flag off.)
             has_alpha: ct != "video/webm",
             is_sticker: sticker,
             public: false,
@@ -573,6 +585,41 @@ async fn store_item(
         .await
         .ok()?;
     Some(item)
+}
+
+/// Transcode a WebM (video) sticker to an animated WebP by calling the sidecar
+/// transcoder service (a small ffmpeg container — see `transcoder/` + compose),
+/// so it renders as a plain `<img>` (no per-sticker `<video>` decoder) and the
+/// main binary stays ffmpeg-free / distroless. The service downscales + fps-caps.
+/// Returns `None` if the service is unset, unreachable, or fails — the caller
+/// then keeps the original WebM (still works, just heavier).
+async fn transcode_webm_to_webp(input: &[u8]) -> Option<Vec<u8>> {
+    let base = std::env::var("ZENITHAR_TRANSCODER_URL").ok()?;
+    let url = format!("{}/webm2webp", base.trim_end_matches('/'));
+    let resp = transcoder_client()
+        .post(url)
+        .header(reqwest::header::CONTENT_TYPE, "video/webm")
+        .body(input.to_vec())
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let bytes = resp.bytes().await.ok()?;
+    (!bytes.is_empty()).then(|| bytes.to_vec())
+}
+
+/// Shared HTTP client for the transcoder sidecar (generous timeout — a webm with
+/// many frames takes a moment; it's a one-off import step, not a hot path).
+fn transcoder_client() -> &'static reqwest::Client {
+    static C: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    C.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
 }
 
 /// Split an uploaded pack file into `(name, bytes)` entries: unzip a ZIP/

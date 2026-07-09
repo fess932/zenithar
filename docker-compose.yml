@@ -30,6 +30,11 @@ services:
       # HTTP/WebSocket port. Under host networking the `ports:` mapping doesn't
       # apply, so set the port here (ZENITHAR_BIND sets the full host:port).
       ZENITHAR_PORT: "3000"
+      # WebM (video) sticker transcoder sidecar (below). On import, webm stickers
+      # are converted to animated WebP here so they render as a plain <img> (no
+      # <video> jank). Both services use host networking → reach it on loopback.
+      # Unset/unreachable → stickers just stay WebM (graceful fallback).
+      ZENITHAR_TRANSCODER_URL: "http://127.0.0.1:3001"
       # Behind TLS (reverse proxy), mark auth cookies Secure:
       # ZENITHAR_SECURE_COOKIES: "1"
       # STUN for WebRTC ICE (comma-separated). Empty works on a LAN/localhost.
@@ -76,4 +81,17 @@ services:
       - --data-home=/greptimedb_data
     volumes:
       - /opt/zenithar/data/greptimedb:/greptimedb_data
+    restart: unless-stopped
+
+  # WebM -> animated WebP transcoder sidecar (ffmpeg lives here, NOT in the main
+  # distroless image). The backend POSTs video stickers on import and gets back
+  # an animated WebP, so they render as a plain <img> (no per-sticker <video>).
+  # Built locally from ./transcoder (tiny: python-slim + ffmpeg). Host networking
+  # + loopback bind so :3001 is reachable by zenithar but NOT exposed externally.
+  transcoder:
+    build: ./transcoder
+    network_mode: host
+    environment:
+      TRANSCODER_BIND: "127.0.0.1"
+      TRANSCODER_PORT: "3001"
     restart: unless-stopped

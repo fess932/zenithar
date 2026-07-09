@@ -49,6 +49,8 @@ RUN mkdir -p /seed-data
 # 3. Runtime: just the binary on distroless/cc — glibc + libgcc (matches the
 # builder), no shell, no package manager. Runs as root so it can always write a
 # bind-mounted ./data that the host created as root (no manual chown needed).
+# WebM sticker transcoding is offloaded to the `transcoder` sidecar (ffmpeg lives
+# there, not here — see transcoder/ + docker-compose.yml), so this image stays lean.
 FROM gcr.io/distroless/cc-debian12 AS runtime
 COPY --from=backend /app/backend/target/release/zenithar-backend /usr/local/bin/zenithar-backend
 # /data holds the SQLite DB, attachments, future call recordings, and the
