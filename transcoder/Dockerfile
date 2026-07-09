@@ -10,8 +10,10 @@ COPY server.py /app/server.py
 
 # Loopback by default — reached over host networking at 127.0.0.1:PORT, never
 # exposed publicly. Override TRANSCODER_BIND/PORT via compose if needed.
+# PYTHONUNBUFFERED so logs appear live in `docker logs` (no stdout buffering).
 ENV TRANSCODER_BIND=127.0.0.1 \
-    TRANSCODER_PORT=3001
+    TRANSCODER_PORT=3001 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 EXPOSE 3001
