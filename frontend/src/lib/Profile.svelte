@@ -263,12 +263,12 @@
               {#each p.items.slice(0, 12) as it (it.id)}
                 <div class="grid aspect-square place-items-center rounded p-0.5">
                   {#if isLottie(it.content_type)}
-                    <Sticker src={sharedItemUrl(p.share_slug, it.id)} format="lottie" size={52} />
+                    <Sticker src={sharedItemUrl(p.share_slug, it.id, it.size)} format="lottie" size={52} />
                   {:else if isVideoSticker(it.content_type)}
-                    <Sticker src={sharedItemUrl(p.share_slug, it.id)} format="webm" size={52} />
+                    <Sticker src={sharedItemUrl(p.share_slug, it.id, it.size)} format="webm" size={52} />
                   {:else}
                     <img
-                      src={sharedItemUrl(p.share_slug, it.id)}
+                      src={sharedItemUrl(p.share_slug, it.id, it.size)}
                       alt={it.filename}
                       loading="lazy"
                       class="max-h-full max-w-full object-contain"

@@ -29,11 +29,16 @@ export function openAddPack(slug: string): void {
   addPackSlug.set(slug);
 }
 
+// Blobs are served `immutable` (cached a year). A pack item can change bytes in
+// place (WebM→WebP convert reuses the same id), so pass a `v` cache-buster that
+// changes with the content (its byte size) — else the browser keeps serving the
+// stale WebM from cache and an <img> can't decode it (stuck skeleton).
 /// A pack item's own blob (owner view). Shared previews use `sharedItemUrl`.
-export const packItemUrl = (id: string): string => `/api/saved/${id}/file`;
+export const packItemUrl = (id: string, v?: number | string): string =>
+  `/api/saved/${id}/file${v != null ? `?v=${v}` : ""}`;
 /// A shared pack's item blob — readable by anyone who has the slug.
-export const sharedItemUrl = (slug: string, id: string): string =>
-  `/api/packs/${slug}/items/${id}/file`;
+export const sharedItemUrl = (slug: string, id: string, v?: number | string): string =>
+  `/api/packs/${slug}/items/${id}/file${v != null ? `?v=${v}` : ""}`;
 
 /// The link to share a pack: opening it prompts the recipient to add the pack.
 export const packShareUrl = (slug: string): string =>

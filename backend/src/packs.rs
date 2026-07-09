@@ -230,11 +230,22 @@ pub async fn convert(
         else {
             continue;
         };
+        // Swap the extension so the filename (and its alt text) stops claiming
+        // ".webm" now that the bytes are WebP.
+        let new_name = {
+            let stem = it
+                .filename
+                .rsplit_once('.')
+                .map(|(s, _)| s)
+                .unwrap_or(&it.filename);
+            format!("{stem}.webp")
+        };
         // Stickers render bare from the original blob, so flag has_alpha like the
         // import path does (matches store_item's `ct != "video/webm"`).
         let _ = db::update_saved_media(
             &state.db,
             &it.id,
+            &new_name,
             "image/webp",
             size,
             prepared.width,

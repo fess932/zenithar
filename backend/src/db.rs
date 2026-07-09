@@ -545,6 +545,7 @@ pub async fn set_saved_public(
 pub async fn update_saved_media(
     write: &SqlitePool,
     id: &str,
+    filename: &str,
     content_type: &str,
     size: i64,
     width: Option<i64>,
@@ -553,10 +554,11 @@ pub async fn update_saved_media(
     has_alpha: bool,
 ) -> sqlx::Result<()> {
     sqlx::query(
-        "UPDATE saved_items SET content_type = ?2, size = ?3, width = ?4, height = ?5, \
-         has_thumb = ?6, has_alpha = ?7 WHERE id = ?1",
+        "UPDATE saved_items SET filename = ?2, content_type = ?3, size = ?4, width = ?5, \
+         height = ?6, has_thumb = ?7, has_alpha = ?8 WHERE id = ?1",
     )
     .bind(id)
+    .bind(filename)
     .bind(content_type)
     .bind(size)
     .bind(width)

@@ -215,7 +215,7 @@
           <div class="relative aspect-square">
             <PickerTile
               onSend={onSend ? () => onSend?.(it.id) : null}
-              previewSrc={packItemUrl(it.id)}
+              previewSrc={packItemUrl(it.id, it.size)}
               previewKind={isLottie(it.content_type)
                 ? "lottie"
                 : isVideoSticker(it.content_type)
@@ -227,12 +227,12 @@
                 : 'cursor-default'}"
             >
               {#if isLottie(it.content_type)}
-                <Sticker src={packItemUrl(it.id)} format="lottie" alt={it.filename} size={52} />
+                <Sticker src={packItemUrl(it.id, it.size)} format="lottie" alt={it.filename} size={52} />
               {:else if isVideoSticker(it.content_type)}
-                <Sticker src={packItemUrl(it.id)} format="webm" alt={it.filename} size={52} />
+                <Sticker src={packItemUrl(it.id, it.size)} format="webm" alt={it.filename} size={52} />
               {:else}
                 <!-- The original blob, so animated WebP/GIF actually animate. -->
-                <Thumb src={packItemUrl(it.id)} alt={it.filename} class="max-h-full max-w-full object-contain" />
+                <Thumb src={packItemUrl(it.id, it.size)} alt={it.filename} class="max-h-full max-w-full object-contain" />
               {/if}
             </PickerTile>
             {#if managing.has(p.id)}
